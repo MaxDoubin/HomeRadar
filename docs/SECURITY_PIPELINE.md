@@ -2,7 +2,8 @@
 
 ## DNS firewall
 
-`backend/dns/proxy.py` is a concurrent UDP DNS proxy. For each request it:
+`backend/dns/proxy.py` is a concurrent UDP and TCP DNS proxy. It retries truncated UDP
+answers over TCP. For each request it:
 
 1. parses the DNS question;
 2. attributes the source IP to an inventoried device;
@@ -48,3 +49,26 @@ small-data statistics instead of a black-box model so a family can understand th
 
 The household score is the average device trust score minus a severity-weighted open
 alert penalty. Dashboard and weekly-digest values come from the same calculation.
+
+## Operational resilience
+
+An hourly maintenance worker prunes expired threat cache, old traffic metadata, and old
+resolved alerts. It uses SQLite's online backup API to create a daily copy, runs
+`PRAGMA quick_check` against the copy, and only then exposes it for download. Backup
+filenames are validated before file access.
+
+The health endpoint checks the live database, data-volume free space, DNS settings,
+blocklist presence/freshness, latest discovery timestamp, and backup count. The dashboard
+surfaces degraded conditions without exposing credentials.
+
+## Device policy and exposure review
+
+Each inventoried device can pause internet access, define a recurring quiet-hour window,
+and add exact or parent-domain rules. Policy is enforced only for DNS handled by Home
+Radar; allow rules do not bypass the security blocklist.
+
+The exposure audit reuses ports already observed by fingerprinting. It reports concrete
+evidence such as an accepting Telnet, SMB, RTSP, FTP, HTTP, or Remote Desktop port and
+gives a hardening recommendation. It never attempts a password, exploit, or destructive
+probe and never claims that an open port proves a CVE. Current findings contribute an
+explainable penalty to the device trust score.

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from backend import config
 from backend.alerts.email_digest import build_digest, send_digest
@@ -11,7 +12,15 @@ from backend.discovery.scan_runner import run_discovery_scan
 from backend.dns.blocklists import record_update_results
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
+from backend.monitor.exposure_audit import audit_all, audit_device
 from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
+from backend.maintenance import (
+    backup_path,
+    create_backup,
+    health_report,
+    list_backups,
+    prune_backups,
+)
 from backend.services import blocklists
 
 router = APIRouter()
@@ -39,6 +48,21 @@ class ConnectionObservation(BaseModel):
     bytes_received: int = Field(default=0, ge=0)
 
 
+class SetupRequest(BaseModel):
+    household_name: str = Field(min_length=1, max_length=120)
+    digest_email: str = Field(default="", max_length=320)
+    dns_upstream: str = Field(default="1.1.1.1", max_length=255)
+    notifications_enabled: bool = True
+
+
+class DevicePolicyUpdate(BaseModel):
+    internet_enabled: bool = True
+    block_start: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    block_end: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    blocked_domains: list[str] = Field(default_factory=list, max_length=500)
+    allowed_domains: list[str] = Field(default_factory=list, max_length=500)
+
+
 @router.get("/status")
 def get_status():
     with get_conn() as conn:
@@ -52,6 +76,12 @@ def get_status():
         "dns_enabled": config.DNS_ENABLED,
         "blocklist_domains": blocklists.count,
     }
+
+
+@router.get("/health")
+def get_health():
+    with get_conn() as conn:
+        return health_report(conn)
 
 
 @router.get("/dashboard")
@@ -125,6 +155,32 @@ def get_device_trust(device_id: int):
     }
 
 
+@router.get("/devices/{device_id}/policy")
+def get_device_policy(device_id: int):
+    with get_conn() as conn:
+        if models.get_device(conn, device_id) is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return models.get_device_policy(conn, device_id)
+
+
+@router.put("/devices/{device_id}/policy")
+def update_device_policy(device_id: int, update: DevicePolicyUpdate):
+    try:
+        with get_conn() as conn:
+            return models.set_device_policy(conn, device_id, **update.model_dump())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Device not found") from exc
+
+
+@router.get("/devices/{device_id}/findings")
+def get_device_findings(device_id: int):
+    with get_conn() as conn:
+        device = models.get_device(conn, device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return audit_device(conn, device)
+
+
 @router.get("/inventory/summary")
 def get_inventory_summary():
     """Counts by device type and top vendor for dashboard visualizations."""
@@ -180,6 +236,19 @@ def recalculate_trust():
     return {"devices": updates, "household": household}
 
 
+@router.get("/findings")
+def get_findings(unresolved_only: bool = True):
+    with get_conn() as conn:
+        return models.list_findings(conn, unresolved_only=unresolved_only)
+
+
+@router.post("/audit")
+def run_exposure_audit():
+    with get_conn() as conn:
+        findings = audit_all(conn)
+    return {"finding_count": len(findings), "findings": findings}
+
+
 @router.get("/blocklists")
 def get_blocklist_status():
     with get_conn() as conn:
@@ -228,6 +297,7 @@ def get_settings():
         "dns_upstream": saved.get("dns_upstream", config.DNS_UPSTREAM),
         "notifications_enabled": saved.get("notifications_enabled", "true") == "true",
         "dns_enabled": config.DNS_ENABLED,
+        "setup_complete": saved.get("setup_complete", "false") == "true",
     }
 
 
@@ -240,6 +310,60 @@ def update_settings(update: SettingsUpdate):
     with get_conn() as conn:
         models.set_settings(conn, values)
     return get_settings()
+
+
+@router.get("/setup")
+def get_setup_status():
+    settings = get_settings()
+    return {
+        "complete": settings["setup_complete"],
+        "defaults": settings,
+        "requirements": {
+            "dns_restart_required": True,
+            "router_change_required": True,
+        },
+    }
+
+
+@router.post("/setup")
+def complete_setup(setup: SetupRequest):
+    with get_conn() as conn:
+        models.set_settings(
+            conn,
+            {
+                **setup.model_dump(),
+                "notifications_enabled": str(setup.notifications_enabled).lower(),
+                "setup_complete": "true",
+            },
+        )
+    return {
+        "complete": True,
+        "settings": get_settings(),
+        "next_step": (
+            "Restart the appliance after applying DNS environment changes, test one "
+            "client, then update the router DHCP DNS setting."
+        ),
+    }
+
+
+@router.get("/backups")
+def get_backups():
+    return {"backups": list_backups(), "retention": config.BACKUP_RETENTION_COUNT}
+
+
+@router.post("/backups")
+def create_database_backup():
+    path = create_backup()
+    prune_backups()
+    return {"backup": next(item for item in list_backups() if item["name"] == path.name)}
+
+
+@router.get("/backups/{name}")
+def download_database_backup(name: str):
+    path = backup_path(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(path, filename=path.name, media_type="application/x-sqlite3")
 
 
 @router.get("/digest/preview")

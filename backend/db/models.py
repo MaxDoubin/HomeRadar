@@ -388,3 +388,96 @@ def get_settings(conn) -> dict[str, str]:
         row["key"]: row["value"]
         for row in conn.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
     }
+
+
+def get_device_policy(conn, device_id: int) -> dict:
+    row = conn.execute(
+        "SELECT * FROM device_policies WHERE device_id = ?", (device_id,)
+    ).fetchone()
+    if row is None:
+        return {
+            "device_id": device_id,
+            "internet_enabled": True,
+            "block_start": None,
+            "block_end": None,
+            "blocked_domains": [],
+            "allowed_domains": [],
+        }
+    policy = dict(row)
+    policy["internet_enabled"] = bool(policy["internet_enabled"])
+    for field in ("blocked_domains", "allowed_domains"):
+        try:
+            policy[field] = json.loads(policy[field] or "[]")
+        except json.JSONDecodeError:
+            policy[field] = []
+    return policy
+
+
+def set_device_policy(
+    conn,
+    device_id: int,
+    *,
+    internet_enabled: bool = True,
+    block_start: str | None = None,
+    block_end: str | None = None,
+    blocked_domains: list[str] | None = None,
+    allowed_domains: list[str] | None = None,
+) -> dict:
+    if get_device(conn, device_id) is None:
+        raise LookupError("device not found")
+    conn.execute(
+        """INSERT INTO device_policies (
+               device_id, internet_enabled, block_start, block_end,
+               blocked_domains, allowed_domains, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(device_id) DO UPDATE SET
+               internet_enabled = excluded.internet_enabled,
+               block_start = excluded.block_start,
+               block_end = excluded.block_end,
+               blocked_domains = excluded.blocked_domains,
+               allowed_domains = excluded.allowed_domains,
+               updated_at = excluded.updated_at""",
+        (
+            device_id,
+            int(internet_enabled),
+            block_start,
+            block_end,
+            json.dumps(sorted(set(blocked_domains or []))),
+            json.dumps(sorted(set(allowed_domains or []))),
+            _now(),
+        ),
+    )
+    return get_device_policy(conn, device_id)
+
+
+def list_findings(
+    conn,
+    *,
+    device_id: int | None = None,
+    unresolved_only: bool = True,
+) -> list[dict]:
+    query = """
+        SELECT exposure_findings.*, devices.hostname, devices.ip, devices.vendor
+        FROM exposure_findings
+        JOIN devices ON devices.id = exposure_findings.device_id
+        WHERE 1 = 1
+    """
+    params = []
+    if device_id is not None:
+        query += " AND exposure_findings.device_id = ?"
+        params.append(device_id)
+    if unresolved_only:
+        query += " AND exposure_findings.is_resolved = 0"
+    query += """
+        ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                 last_seen DESC
+    """
+    rows = []
+    for row in conn.execute(query, params).fetchall():
+        finding = dict(row)
+        try:
+            finding["evidence"] = json.loads(finding["evidence"] or "[]")
+        except json.JSONDecodeError:
+            finding["evidence"] = []
+        rows.append(finding)
+    return rows

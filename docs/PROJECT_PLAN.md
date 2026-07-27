@@ -52,10 +52,9 @@ flash, plug in, protected.
 
 - ML anomaly detection (Isolation Forest or Autoencoder) on traffic patterns to catch
   zero-day-style behavior without signature matching
-- Parental controls / screen time tracking per device
+- [x] Per-device DNS internet pause, quiet-hour schedules, and custom domain rules
 - Bandwidth usage monitoring per device
-- Automatic vulnerability scanning of discovered devices (open ports, default
-  credentials check)
+- [x] Non-invasive service exposure audit from observed ports (no credential attempts)
 - Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
   detection)
 - Mobile companion app (React Native) for push notifications
@@ -188,7 +187,7 @@ email.**
 - [x] Add Debian live ISO build configuration (physical boot validation remains)
 - [x] Build Docker Compose alternative install
 - [x] Write install guide (Docker, native Debian, DNS activation, rollback, ISO)
-- [ ] First-run setup wizard in the dashboard (set household name, email for digest,
+- [x] First-run setup wizard in the dashboard (set household name, email for digest,
       confirm DNS)
 - [ ] 3D print a small case badge or stand for the "Home Radar appliance" look (optional
       but nice)

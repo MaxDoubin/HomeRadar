@@ -19,6 +19,8 @@ from backend.dns.blocklists import record_update_results
 from backend.dns.proxy import DNSProxy
 from backend.monitor.trust_scoring import recalculate_all
 from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
+from backend.monitor.exposure_audit import audit_all
+from backend.maintenance import backup_if_due, cleanup_database
 from backend.services import blocklists
 
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +45,7 @@ async def _trust_loop():
     while True:
         try:
             with get_conn() as conn:
+                audit_all(conn)
                 recalculate_all(conn)
         except Exception:
             logger.exception("Trust score recalculation failed")
@@ -61,6 +64,17 @@ async def _blocklist_loop():
         await asyncio.sleep(max(1, config.BLOCKLIST_UPDATE_HOURS) * 3600)
 
 
+async def _maintenance_loop():
+    while True:
+        try:
+            with get_conn() as conn:
+                cleanup_database(conn)
+            await asyncio.to_thread(backup_if_due)
+        except Exception:
+            logger.exception("Maintenance pass failed")
+        await asyncio.sleep(max(300, config.MAINTENANCE_INTERVAL_SECONDS))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -68,6 +82,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_discovery_loop()),
         asyncio.create_task(_trust_loop()),
         asyncio.create_task(_blocklist_loop()),
+        asyncio.create_task(_maintenance_loop()),
     ]
     dns_proxy = None
     dns_thread = None
