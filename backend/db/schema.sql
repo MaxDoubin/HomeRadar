@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS traffic_logs (
     bytes_sent      INTEGER DEFAULT 0,
     bytes_received  INTEGER DEFAULT 0,
     was_blocked     INTEGER DEFAULT 0,
+    threat_level    TEXT DEFAULT 'none',
+    threat_reason   TEXT,
+    query_type      TEXT,
     created_at      TEXT NOT NULL
 );
 
@@ -56,9 +59,61 @@ CREATE TABLE IF NOT EXISTS trust_scores (
     created_at      TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key             TEXT PRIMARY KEY,
+    value           TEXT,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS threat_cache (
+    indicator       TEXT NOT NULL,
+    indicator_type  TEXT NOT NULL,
+    is_malicious    INTEGER NOT NULL DEFAULT 0,
+    confidence      INTEGER NOT NULL DEFAULT 0,
+    source          TEXT NOT NULL,
+    detail          TEXT,
+    expires_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (indicator, indicator_type, source)
+);
+
+CREATE TABLE IF NOT EXISTS blocklist_metadata (
+    source          TEXT PRIMARY KEY,
+    domain_count    INTEGER NOT NULL DEFAULT 0,
+    status          TEXT NOT NULL,
+    error           TEXT,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS cisa_kev (
+    cve_id          TEXT PRIMARY KEY,
+    vendor_project  TEXT,
+    product         TEXT,
+    vulnerability_name TEXT,
+    date_added      TEXT,
+    due_date        TEXT,
+    ransomware_use  TEXT,
+    required_action TEXT,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS behavior_baselines (
+    device_id       INTEGER NOT NULL REFERENCES devices(id),
+    metric          TEXT NOT NULL,
+    mean            REAL NOT NULL DEFAULT 0,
+    variance        REAL NOT NULL DEFAULT 0,
+    samples         INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (device_id, metric)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_device ON alerts(device_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_device ON traffic_logs(device_id);
 CREATE INDEX IF NOT EXISTS idx_trust_scores_device ON trust_scores(device_id);
 CREATE INDEX IF NOT EXISTS idx_devices_type ON devices(device_type);
 CREATE INDEX IF NOT EXISTS idx_devices_vendor ON devices(vendor);
+CREATE INDEX IF NOT EXISTS idx_traffic_created ON traffic_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_traffic_domain ON traffic_logs(domain);
+CREATE INDEX IF NOT EXISTS idx_traffic_blocked ON traffic_logs(was_blocked);
+CREATE INDEX IF NOT EXISTS idx_alerts_resolved_created ON alerts(is_resolved, created_at);

@@ -4,6 +4,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = os.environ.get("HOMERADAR_DB_PATH", str(BASE_DIR / "data" / "homeradar.db"))
+DATA_DIR = Path(os.environ.get("HOMERADAR_DATA_DIR", str(BASE_DIR / "data")))
 
 # Network scanning
 LAN_SUBNET = os.environ.get("HOMERADAR_LAN_SUBNET", "auto")  # "auto" = detect from default interface
@@ -27,3 +28,56 @@ COMMON_PORTS = [
 API_HOST = os.environ.get("HOMERADAR_API_HOST", "0.0.0.0")
 API_PORT = int(os.environ.get("HOMERADAR_API_PORT", "8000"))
 CORS_ALLOW_ORIGINS = os.environ.get("HOMERADAR_CORS_ORIGINS", "*").split(",")
+
+# DNS proxy and blocklists. Binding port 53 normally requires root/CAP_NET_BIND_SERVICE;
+# development defaults to 5354 so the API can run unprivileged.
+DNS_ENABLED = os.environ.get("HOMERADAR_DNS_ENABLED", "false").lower() in {"1", "true", "yes"}
+DNS_HOST = os.environ.get("HOMERADAR_DNS_HOST", "0.0.0.0")
+DNS_PORT = int(os.environ.get("HOMERADAR_DNS_PORT", "5354"))
+DNS_UPSTREAM = os.environ.get("HOMERADAR_DNS_UPSTREAM", "1.1.1.1")
+DNS_UPSTREAM_PORT = int(os.environ.get("HOMERADAR_DNS_UPSTREAM_PORT", "53"))
+DNS_TIMEOUT_SECONDS = float(os.environ.get("HOMERADAR_DNS_TIMEOUT", "3"))
+BLOCKLIST_PATH = Path(
+    os.environ.get("HOMERADAR_BLOCKLIST_PATH", str(DATA_DIR / "blocklist.txt"))
+)
+BLOCKLIST_UPDATE_HOURS = int(os.environ.get("HOMERADAR_BLOCKLIST_UPDATE_HOURS", "24"))
+BLOCKLIST_AUTO_UPDATE = os.environ.get(
+    "HOMERADAR_BLOCKLIST_AUTO_UPDATE", "false"
+).lower() in {"1", "true", "yes"}
+BLOCKLIST_URLS = [
+    url.strip()
+    for url in os.environ.get(
+        "HOMERADAR_BLOCKLIST_URLS",
+        (
+            "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts,"
+            "https://big.oisd.nl/domainswild2"
+        ),
+    ).split(",")
+    if url.strip()
+]
+
+# Threat intelligence and scoring
+ABUSEIPDB_API_KEY = os.environ.get("HOMERADAR_ABUSEIPDB_API_KEY", "")
+ABUSEIPDB_MIN_CONFIDENCE = int(os.environ.get("HOMERADAR_ABUSEIPDB_MIN_CONFIDENCE", "70"))
+THREAT_CACHE_HOURS = int(os.environ.get("HOMERADAR_THREAT_CACHE_HOURS", "24"))
+TRUST_SCORE_INTERVAL_SECONDS = int(os.environ.get("HOMERADAR_TRUST_SCORE_INTERVAL", "300"))
+TRAFFIC_MONITOR_ENABLED = os.environ.get(
+    "HOMERADAR_TRAFFIC_MONITOR_ENABLED", "false"
+).lower() in {"1", "true", "yes"}
+TRAFFIC_INTERFACE = os.environ.get("HOMERADAR_TRAFFIC_INTERFACE", "") or None
+TRAFFIC_FLUSH_SECONDS = int(os.environ.get("HOMERADAR_TRAFFIC_FLUSH_SECONDS", "30"))
+CISA_KEV_URL = os.environ.get(
+    "HOMERADAR_CISA_KEV_URL",
+    "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+)
+
+# Household and digest settings
+HOUSEHOLD_NAME = os.environ.get("HOMERADAR_HOUSEHOLD_NAME", "My Home")
+PUBLIC_BASE_URL = os.environ.get("HOMERADAR_PUBLIC_URL", "http://homeradar.local:8000")
+SMTP_HOST = os.environ.get("HOMERADAR_SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("HOMERADAR_SMTP_PORT", "587"))
+SMTP_USERNAME = os.environ.get("HOMERADAR_SMTP_USERNAME", "")
+SMTP_PASSWORD = os.environ.get("HOMERADAR_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("HOMERADAR_SMTP_FROM", "")
+SMTP_TO = os.environ.get("HOMERADAR_SMTP_TO", "")
+SMTP_USE_TLS = os.environ.get("HOMERADAR_SMTP_USE_TLS", "true").lower() in {"1", "true", "yes"}

@@ -10,22 +10,36 @@ Built for the [Congressional App Challenge](https://www.congressionalappchalleng
 
 ## Status
 
-**Phase 1 foundation complete; advanced discovery is implemented.** Home Radar now
-combines ARP, the operating-system neighbor cache, mDNS/DNS-SD, SSDP/UPnP, reverse DNS,
-MAC vendor data, and targeted service-port checks. It is still development software and
-is not yet ready to replace a production security appliance.
+**The integrated MVP foundation is implemented.** Home Radar combines advanced device
+discovery with a local DNS firewall, community blocklists, optional reputation feeds,
+behavior-based trust scoring, real-time alerts, weekly digests, and a responsive React
+dashboard. Docker, systemd, kiosk, and Debian live-ISO build paths are included.
+
+It remains development software until it completes real-network, old-hardware, DNS
+failover, and week-long reliability testing.
 See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the full roadmap.
 
-## Quick start (development)
+## Quick start
+
+Docker on a Linux appliance gives discovery and DNS access to the real LAN:
 
 ```bash
-cd backend
-pip install -r requirements.txt
-sudo python3 main.py   # sudo/CAP_NET_RAW needed for ARP scanning
+cp .env.example .env
+docker compose -f docker/docker-compose.yml up --build
 ```
 
-The API comes up at `http://localhost:8000`. Try `GET /status`, `GET /devices`,
-`GET /inventory/summary`, `GET /alerts`, or `POST /scan` to trigger a discovery pass.
+Open `http://<appliance-ip>:8000`. After verifying the dashboard, point your router's
+DHCP DNS setting to the appliance IP to enable household-wide DNS logging and blocking.
+
+For backend development:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r backend/requirements.txt
+.venv/bin/python -m backend.main
+```
+
+For frontend development, run `npm install && npm run dev` in `frontend/`.
 
 ## How it works
 
@@ -40,8 +54,15 @@ smart speakers, smart-home hubs, plugs, thermostats, wearables, NAS devices, med
 servers, and generic IoT devices. Unknown remains a valid result when the evidence is
 weak - Home Radar does not invent an identity.
 
+DNS requests pass through an independent local proxy that returns `NXDOMAIN` for
+blocklisted domains, refuses DNS for household-blocked devices, forwards allowed
+requests to the configured upstream resolver, and records only security metadata.
+Optional passive flow observation and AbuseIPDB checks add outbound-connection context.
+All security decisions remain explainable and local.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 See [docs/DEVICE_FINGERPRINTING.md](docs/DEVICE_FINGERPRINTING.md) for the signal model.
+See [docs/SECURITY_PIPELINE.md](docs/SECURITY_PIPELINE.md) for DNS, intelligence, and trust scoring.
 
 ## Contributing
 

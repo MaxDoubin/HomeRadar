@@ -137,48 +137,47 @@ terminal.**
 
 ### Phase 2: DNS Proxy & Threat Blocking — 2 weeks
 
-- [ ] Build DNS proxy server (intercept DNS queries, resolve or block)
-- [ ] Integrate community blocklists (auto-download and parse Steven Black, OISD)
-- [ ] Build blocklist update cron job
-- [ ] Log all DNS queries per device (store in SQLite)
-- [ ] Integrate AbuseIPDB API for IP reputation lookups
-- [ ] Integrate CISA KEV feed for known-bad infrastructure
-- [ ] Build outbound connection monitor (flag connections to bad IPs/domains)
-- [ ] New device detection + alert generation
+- [x] Build DNS proxy server (intercept DNS queries, resolve or block)
+- [x] Integrate community blocklists (auto-download and parse Steven Black, OISD)
+- [x] Build blocklist update systemd timer
+- [x] Log all DNS queries per device (store in SQLite)
+- [x] Integrate cached AbuseIPDB API reputation lookups
+- [x] Integrate CISA KEV feed as a software-vulnerability catalog
+- [x] Build optional outbound connection monitor (flag connections to bad IPs)
+- [x] New device detection + deduplicated alert generation
 
 **Milestone: DNS blocking is live, malware domains are blocked, bad outbound connections
 are flagged.**
 
 ### Phase 3: Dashboard — 3 weeks
 
-- [ ] React project setup with Tailwind
-- [ ] Dashboard home page: security score, device count, active alerts, 24h traffic
+- [x] React project setup with responsive custom CSS
+- [x] Dashboard home page: security score, device count, active alerts, 24h traffic
       sparkline
-- [ ] Devices page: grid/list of all devices with type icon, name, IP, MAC, trust score,
+- [x] Devices page: grid/list of all devices with type icon, name, IP, MAC, trust score,
       last seen
-- [ ] Device detail page: DNS query history, traffic stats, trust score breakdown,
+- [x] Device detail view: DNS query history, traffic stats, trust score breakdown,
       authorize/block
-- [ ] Alerts page: chronological feed with severity, device, description
-- [ ] Traffic page: per-device bandwidth, top domains, blocked queries chart
-- [ ] Settings page: email config, DNS settings, alert preferences
-- [ ] WebSocket for real-time updates (new device toast, live alert feed)
-- [ ] Network map visualization (D3.js force-directed graph showing devices and
-      connections)
-- [ ] Build kiosk status display for the appliance's own screen
+- [x] Alerts page: chronological feed with severity, device, description
+- [x] Traffic page: traffic metadata, top domains, blocked queries chart
+- [x] Settings page: email config, DNS settings, alert preferences
+- [x] WebSocket for real-time updates and browser notifications
+- [x] Interactive household network map visualization
+- [x] Build kiosk status display for the appliance's own screen
 
 **Milestone: Full working dashboard accessible from any phone on the network.**
 
 ### Phase 4: Trust Scoring & Intelligence — 2 weeks
 
-- [ ] Design trust scoring algorithm:
+- [x] Design explainable trust scoring algorithm:
   - Base score: 50 (new device)
   - +points: recognized manufacturer, expected behavior, low outbound variance
   - -points: contacts known-bad IPs, unusual DNS queries, high data volume, unexpected
     LAN scanning
-- [ ] Historical behavior tracking per device
-- [ ] Anomaly flagging (device suddenly changes behavior pattern)
-- [ ] Weekly email digest builder (Jinja2 template, smtplib)
-- [ ] Security score calculation for the whole household (weighted average of all device
+- [x] Historical behavior tracking per device
+- [x] Anomaly flagging using online per-device statistical baselines
+- [x] Weekly email digest builder and SMTP delivery
+- [x] Security score calculation for the whole household (weighted average of all device
       trust scores + blocked threats + open issues)
 
 **Milestone: Every device has a live trust score, household gets a weekly security
@@ -186,9 +185,9 @@ email.**
 
 ### Phase 5: Packaging & Polish — 2 weeks
 
-- [ ] Build Debian live ISO with live-build (auto-starts Home Radar services on boot)
-- [ ] Build Docker Compose alternative install
-- [ ] Write one-page install guide (flash USB, boot, plug in ethernet, open dashboard)
+- [x] Add Debian live ISO build configuration (physical boot validation remains)
+- [x] Build Docker Compose alternative install
+- [x] Write install guide (Docker, native Debian, DNS activation, rollback, ISO)
 - [ ] First-run setup wizard in the dashboard (set household name, email for digest,
       confirm DNS)
 - [ ] 3D print a small case badge or stand for the "Home Radar appliance" look (optional

@@ -18,6 +18,12 @@ _DEVICE_COLUMNS = {
     "fingerprint": "TEXT",
 }
 
+_TRAFFIC_COLUMNS = {
+    "threat_level": "TEXT DEFAULT 'none'",
+    "threat_reason": "TEXT",
+    "query_type": "TEXT",
+}
+
 _JSON_DEVICE_FIELDS = ("open_ports", "services", "discovery_sources", "fingerprint")
 
 
@@ -35,6 +41,12 @@ def init_db(db_path: str = config.DB_PATH) -> None:
         for column, definition in _DEVICE_COLUMNS.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE devices ADD COLUMN {column} {definition}")
+        traffic_existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(traffic_logs)").fetchall()
+        }
+        for column, definition in _TRAFFIC_COLUMNS.items():
+            if column not in traffic_existing:
+                conn.execute(f"ALTER TABLE traffic_logs ADD COLUMN {column} {definition}")
 
 
 @contextmanager
@@ -187,9 +199,192 @@ def create_alert(conn, device_id: int | None, severity: str, title: str, descrip
     return cur.lastrowid
 
 
+def create_alert_once(
+    conn,
+    device_id: int | None,
+    severity: str,
+    title: str,
+    description: str = "",
+    *,
+    window_minutes: int = 60,
+) -> int | None:
+    """Create an alert unless an equivalent open alert was recently recorded."""
+    existing = conn.execute(
+        """SELECT id FROM alerts
+           WHERE device_id IS ? AND title = ? AND is_resolved = 0
+             AND julianday(created_at) >= julianday('now', ?)
+           ORDER BY created_at DESC LIMIT 1""",
+        (device_id, title, f"-{max(1, window_minutes)} minutes"),
+    ).fetchone()
+    if existing:
+        return None
+    return create_alert(conn, device_id, severity, title, description)
+
+
 def list_alerts(conn, unresolved_only: bool = False) -> list[dict]:
     query = "SELECT * FROM alerts"
     if unresolved_only:
         query += " WHERE is_resolved = 0"
     query += " ORDER BY created_at DESC"
     return [dict(row) for row in conn.execute(query).fetchall()]
+
+
+def resolve_alert(conn, alert_id: int, resolved: bool = True) -> bool:
+    cur = conn.execute(
+        "UPDATE alerts SET is_resolved = ? WHERE id = ?",
+        (int(resolved), alert_id),
+    )
+    return cur.rowcount > 0
+
+
+def set_device_authorization(conn, device_id: int, state: int) -> bool:
+    if state not in {0, 1, 2}:
+        raise ValueError("authorization state must be 0, 1, or 2")
+    cur = conn.execute(
+        "UPDATE devices SET is_authorized = ? WHERE id = ?",
+        (state, device_id),
+    )
+    if cur.rowcount:
+        labels = {0: "pending", 1: "authorized", 2: "blocked"}
+        conn.execute(
+            """INSERT INTO events (device_id, event_type, detail, created_at)
+               VALUES (?, 'authorization_changed', ?, ?)""",
+            (device_id, labels[state], _now()),
+        )
+    return cur.rowcount > 0
+
+
+def find_device_by_ip(conn, ip: str) -> dict | None:
+    row = conn.execute("SELECT * FROM devices WHERE ip = ?", (ip,)).fetchone()
+    return _device_dict(row) if row else None
+
+
+def log_traffic(
+    conn,
+    *,
+    device_id: int | None,
+    domain: str | None = None,
+    dest_ip: str | None = None,
+    was_blocked: bool = False,
+    threat_level: str = "none",
+    threat_reason: str | None = None,
+    query_type: str | None = None,
+    bytes_sent: int = 0,
+    bytes_received: int = 0,
+) -> int:
+    cur = conn.execute(
+        """INSERT INTO traffic_logs (
+               device_id, domain, dest_ip, bytes_sent, bytes_received, was_blocked,
+               threat_level, threat_reason, query_type, created_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            device_id, domain, dest_ip, bytes_sent, bytes_received, int(was_blocked),
+            threat_level, threat_reason, query_type, _now(),
+        ),
+    )
+    return cur.lastrowid
+
+
+def list_traffic(
+    conn,
+    *,
+    device_id: int | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    limit = max(1, min(limit, 1000))
+    query = """
+        SELECT traffic_logs.*, devices.hostname, devices.vendor
+        FROM traffic_logs
+        LEFT JOIN devices ON devices.id = traffic_logs.device_id
+    """
+    params: list = []
+    if device_id is not None:
+        query += " WHERE traffic_logs.device_id = ?"
+        params.append(device_id)
+    query += " ORDER BY traffic_logs.created_at DESC LIMIT ?"
+    params.append(limit)
+    return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def traffic_summary(conn, hours: int = 24) -> dict:
+    hours = max(1, min(hours, 24 * 30))
+    modifier = f"-{hours} hours"
+    totals = conn.execute(
+        """SELECT COUNT(*) AS queries,
+                  COALESCE(SUM(was_blocked), 0) AS blocked,
+                  COALESCE(SUM(bytes_sent), 0) AS bytes_sent,
+                  COALESCE(SUM(bytes_received), 0) AS bytes_received
+           FROM traffic_logs WHERE julianday(created_at) >= julianday('now', ?)""",
+        (modifier,),
+    ).fetchone()
+    top_domains = [
+        dict(row) for row in conn.execute(
+            """SELECT domain, COUNT(*) AS count, SUM(was_blocked) AS blocked
+               FROM traffic_logs
+               WHERE julianday(created_at) >= julianday('now', ?) AND domain IS NOT NULL
+               GROUP BY domain ORDER BY count DESC LIMIT 12""",
+            (modifier,),
+        ).fetchall()
+    ]
+    timeline = [
+        dict(row) for row in conn.execute(
+            """SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) AS bucket,
+                      COUNT(*) AS queries, SUM(was_blocked) AS blocked
+               FROM traffic_logs
+               WHERE julianday(created_at) >= julianday('now', ?)
+               GROUP BY bucket ORDER BY bucket""",
+            (modifier,),
+        ).fetchall()
+    ]
+    return {**dict(totals), "top_domains": top_domains, "timeline": timeline, "hours": hours}
+
+
+def set_trust_score(conn, device_id: int, score: int, reason: str) -> None:
+    score = max(0, min(100, int(score)))
+    current = conn.execute(
+        "SELECT trust_score FROM devices WHERE id = ?", (device_id,)
+    ).fetchone()
+    if current is None:
+        return
+    if current["trust_score"] != score:
+        conn.execute(
+            "UPDATE devices SET trust_score = ? WHERE id = ?",
+            (score, device_id),
+        )
+        conn.execute(
+            """INSERT INTO trust_scores (device_id, score, reason, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (device_id, score, reason, _now()),
+        )
+
+
+def trust_history(conn, device_id: int, limit: int = 100) -> list[dict]:
+    return [
+        dict(row) for row in conn.execute(
+            """SELECT * FROM trust_scores WHERE device_id = ?
+               ORDER BY created_at DESC LIMIT ?""",
+            (device_id, max(1, min(limit, 500))),
+        ).fetchall()
+    ]
+
+
+def get_setting(conn, key: str, default: str | None = None) -> str | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_settings(conn, settings: dict[str, str]) -> None:
+    now = _now()
+    conn.executemany(
+        """INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value,
+           updated_at = excluded.updated_at""",
+        [(key, str(value), now) for key, value in settings.items()],
+    )
+
+
+def get_settings(conn) -> dict[str, str]:
+    return {
+        row["key"]: row["value"]
+        for row in conn.execute("SELECT key, value FROM settings ORDER BY key").fetchall()
+    }
