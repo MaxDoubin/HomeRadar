@@ -200,10 +200,37 @@ function Alerts({ alerts, onResolve }) {
   </section>;
 }
 
+function SetupWizard({ onComplete }) {
+  const [step, setStep] = useState(0);
+  const [form, setForm] = useState({household_name:"My Home",digest_email:"",dns_upstream:"1.1.1.1",notifications_enabled:true});
+  const [busy, setBusy] = useState(false);
+  const finish = async () => {
+    setBusy(true);
+    try {
+      await api("/setup", {method:"POST",body:JSON.stringify(form)});
+      onComplete();
+    } finally { setBusy(false); }
+  };
+  return <div className="setup-backdrop"><section className="setup card">
+    <div className="setup-logo"><div className="radar-logo"><i/><i/><i/></div><strong>Home<span>Radar</span></strong></div>
+    <div className="steps"><i className={step >= 0 ? "active":""}/><i className={step >= 1 ? "active":""}/><i className={step >= 2 ? "active":""}/></div>
+    {step === 0 && <><p className="eyebrow">WELCOME HOME</p><h1>Turn this machine into your network lookout.</h1><p className="subtle">Home Radar discovers devices, filters DNS threats, and explains what needs attention. Everything stays on this appliance.</p><label><span>What should we call this household?</span><input value={form.household_name} onChange={(e)=>setForm({...form,household_name:e.target.value})}/></label></>}
+    {step === 1 && <><p className="eyebrow">PROTECTION</p><h1>Choose safe network defaults.</h1><p className="subtle">Allowed DNS requests go to this upstream resolver. You will test one device before changing the router.</p><label><span>Upstream DNS</span><input value={form.dns_upstream} onChange={(e)=>setForm({...form,dns_upstream:e.target.value})}/></label><label><span>Weekly digest email (optional)</span><input type="email" value={form.digest_email} onChange={(e)=>setForm({...form,digest_email:e.target.value})} placeholder="family@example.com"/></label></>}
+    {step === 2 && <><p className="eyebrow">FINAL CHECK</p><h1>Start with visibility, then activate DNS.</h1><div className="setup-checks"><p><b>1</b> Open the dashboard and run discovery.</p><p><b>2</b> Test one client using this appliance for DNS.</p><p><b>3</b> Only then update the router DHCP DNS setting.</p></div><label className="toggle-row"><span><b>Browser notifications</b><small>Notify this browser about new security alerts.</small></span><input type="checkbox" checked={form.notifications_enabled} onChange={(e)=>setForm({...form,notifications_enabled:e.target.checked})}/></label></>}
+    <footer>{step > 0 ? <button onClick={()=>setStep(step-1)}>Back</button>:<span/>}{step < 2 ? <button className="primary" onClick={()=>setStep(step+1)} disabled={!form.household_name.trim()}>Continue</button>:<button className="primary" onClick={finish} disabled={busy}>{busy?"Saving…":"Open Home Radar"}</button>}</footer>
+  </section></div>;
+}
+
 function Settings() {
   const [form, setForm] = useState({});
   const [message, setMessage] = useState("");
-  useEffect(() => { api("/settings").then(setForm); }, []);
+  const [health, setHealth] = useState(null);
+  const [backups, setBackups] = useState([]);
+  const refreshSystem = () => {
+    api("/health").then(setHealth);
+    api("/backups").then((result)=>setBackups(result.backups));
+  };
+  useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
   const save = async (event) => {
     event.preventDefault();
     if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
@@ -213,13 +240,18 @@ function Settings() {
     setMessage("Settings saved");
   };
   return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household, DNS, and digest preferences.</p></div></div>
-    <form className="card settings-form" onSubmit={save}>
+    <div className="settings-grid"><form className="card settings-form" onSubmit={save}>
       <label><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({...form, household_name:e.target.value})}/></label>
       <label><span>Weekly digest email</span><input type="email" value={form.digest_email || ""} onChange={(e) => setForm({...form, digest_email:e.target.value})} placeholder="family@example.com"/></label>
       <label><span>Upstream DNS resolver</span><input value={form.dns_upstream || ""} onChange={(e) => setForm({...form, dns_upstream:e.target.value})}/></label>
       <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while the dashboard is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({...form, notifications_enabled:e.target.checked})}/></label>
       <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
-    </form>
+    </form><aside className="card system-card"><p className="eyebrow">SYSTEM HEALTH</p><h2 className={health?.status === "healthy" ? "good":"warn"}>{health?.status || "Checking…"}</h2>
+      <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "—"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"—"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
+      {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
+      <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
+      {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
+    </aside></div>
   </section>;
 }
 
@@ -229,11 +261,13 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [setupComplete, setSetupComplete] = useState(true);
   const seenAlerts = useRef(new Set());
   const alertsInitialized = useRef(false);
   const load = () => api("/dashboard").then(setData).catch(() => setConnected(false));
   useEffect(() => {
     load();
+    api("/setup").then((result)=>setSetupComplete(result.complete)).catch(()=>{});
     let socket;
     let retry;
     const connect = () => {
@@ -272,5 +306,6 @@ export default function App() {
       </div>
     </main>
     <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }}/>
+    {!setupComplete && <SetupWizard onComplete={()=>setSetupComplete(true)}/>}
   </div>;
 }

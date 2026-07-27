@@ -11,6 +11,7 @@ from backend.monitor.trust_scoring import household_score
 
 
 def build_digest(conn) -> tuple[str, str]:
+    household_name = models.get_setting(conn, "household_name", config.HOUSEHOLD_NAME)
     score = household_score(conn)
     new_devices = conn.execute(
         """SELECT hostname, vendor, ip, device_type FROM devices
@@ -23,9 +24,9 @@ def build_digest(conn) -> tuple[str, str]:
            WHERE julianday(created_at) >= julianday('now', '-7 days')
            ORDER BY created_at DESC LIMIT 20"""
     ).fetchall()
-    subject = f"{config.HOUSEHOLD_NAME} Home Radar digest: security score {score['score']}"
+    subject = f"{household_name} Home Radar digest: security score {score['score']}"
     lines = [
-        f"{config.HOUSEHOLD_NAME} weekly security digest",
+        f"{household_name} weekly security digest",
         "=" * 42,
         f"Household security score: {score['score']}/100",
         f"DNS queries observed: {traffic['queries']}",

@@ -188,7 +188,7 @@ email.**
 - [x] Add Debian live ISO build configuration (physical boot validation remains)
 - [x] Build Docker Compose alternative install
 - [x] Write install guide (Docker, native Debian, DNS activation, rollback, ISO)
-- [ ] First-run setup wizard in the dashboard (set household name, email for digest,
+- [x] First-run setup wizard in the dashboard (set household name, email for digest,
       confirm DNS)
 - [ ] 3D print a small case badge or stand for the "Home Radar appliance" look (optional
       but nice)

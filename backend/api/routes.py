@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from backend import config
 from backend.alerts.email_digest import build_digest, send_digest
@@ -12,6 +13,13 @@ from backend.dns.blocklists import record_update_results
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
 from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
+from backend.maintenance import (
+    backup_path,
+    create_backup,
+    health_report,
+    list_backups,
+    prune_backups,
+)
 from backend.services import blocklists
 
 router = APIRouter()
@@ -39,6 +47,13 @@ class ConnectionObservation(BaseModel):
     bytes_received: int = Field(default=0, ge=0)
 
 
+class SetupRequest(BaseModel):
+    household_name: str = Field(min_length=1, max_length=120)
+    digest_email: str = Field(default="", max_length=320)
+    dns_upstream: str = Field(default="1.1.1.1", max_length=255)
+    notifications_enabled: bool = True
+
+
 @router.get("/status")
 def get_status():
     with get_conn() as conn:
@@ -52,6 +67,12 @@ def get_status():
         "dns_enabled": config.DNS_ENABLED,
         "blocklist_domains": blocklists.count,
     }
+
+
+@router.get("/health")
+def get_health():
+    with get_conn() as conn:
+        return health_report(conn)
 
 
 @router.get("/dashboard")
@@ -228,6 +249,7 @@ def get_settings():
         "dns_upstream": saved.get("dns_upstream", config.DNS_UPSTREAM),
         "notifications_enabled": saved.get("notifications_enabled", "true") == "true",
         "dns_enabled": config.DNS_ENABLED,
+        "setup_complete": saved.get("setup_complete", "false") == "true",
     }
 
 
@@ -240,6 +262,60 @@ def update_settings(update: SettingsUpdate):
     with get_conn() as conn:
         models.set_settings(conn, values)
     return get_settings()
+
+
+@router.get("/setup")
+def get_setup_status():
+    settings = get_settings()
+    return {
+        "complete": settings["setup_complete"],
+        "defaults": settings,
+        "requirements": {
+            "dns_restart_required": True,
+            "router_change_required": True,
+        },
+    }
+
+
+@router.post("/setup")
+def complete_setup(setup: SetupRequest):
+    with get_conn() as conn:
+        models.set_settings(
+            conn,
+            {
+                **setup.model_dump(),
+                "notifications_enabled": str(setup.notifications_enabled).lower(),
+                "setup_complete": "true",
+            },
+        )
+    return {
+        "complete": True,
+        "settings": get_settings(),
+        "next_step": (
+            "Restart the appliance after applying DNS environment changes, test one "
+            "client, then update the router DHCP DNS setting."
+        ),
+    }
+
+
+@router.get("/backups")
+def get_backups():
+    return {"backups": list_backups(), "retention": config.BACKUP_RETENTION_COUNT}
+
+
+@router.post("/backups")
+def create_database_backup():
+    path = create_backup()
+    prune_backups()
+    return {"backup": next(item for item in list_backups() if item["name"] == path.name)}
+
+
+@router.get("/backups/{name}")
+def download_database_backup(name: str):
+    path = backup_path(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Backup not found")
+    return FileResponse(path, filename=path.name, media_type="application/x-sqlite3")
 
 
 @router.get("/digest/preview")

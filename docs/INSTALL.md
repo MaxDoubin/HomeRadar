@@ -18,6 +18,10 @@ Open `http://<appliance-ip>:8000`. The container uses host networking and the mi
 network capabilities needed for discovery and DNS. Runtime data is kept in the named
 `homeradar-data` volume.
 
+The first-run wizard collects the household name, optional digest address, upstream DNS,
+and browser-notification preference. It deliberately does not change the router. Follow
+the staged DNS activation checklist after setup.
+
 ## Native Debian service
 
 On Debian 12 or newer:
@@ -44,6 +48,16 @@ run `sudo systemctl restart homeradar`.
 Port 53 requires root or `CAP_NET_BIND_SERVICE`. ARP and passive capture require
 `CAP_NET_RAW`; capture may require `NET_ADMIN`. DNS still works if passive capture is
 disabled.
+
+## Health, retention, and backups
+
+`GET /health` reports SQLite integrity, disk capacity, DNS configuration, blocklist
+freshness, backup count, and warnings. Home Radar retains DNS/traffic metadata for 30
+days and resolved alerts for 180 days by default; both windows are configurable.
+
+The appliance creates one integrity-checked SQLite backup per day and keeps the latest
+seven. Create, list, and download backups from Settings or the `/backups` API. Backups
+share the persistent `/data` volume in Docker and `/var/lib/homeradar/backups` natively.
 
 ## Live ISO
 
