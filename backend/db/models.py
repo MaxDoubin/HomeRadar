@@ -1,4 +1,4 @@
-"""Thin SQLite data-access layer. No ORM by design -- HomeSentry's DB is meant
+"""Thin SQLite data-access layer. No ORM by design -- Home Radar's DB is meant
 to stay a single portable file a family never has to think about."""
 import json
 import sqlite3

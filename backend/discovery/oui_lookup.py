@@ -2,7 +2,7 @@
 
 Tries the `mac-vendor-lookup` package's bundled IEEE database first (works
 fully offline once its local cache is present). Falls back to a small
-built-in table of common consumer-device vendors so HomeSentry still
+built-in table of common consumer-device vendors so Home Radar still
 labels the obvious cases (phones, smart-home hubs, etc.) with zero
 dependencies and zero network calls.
 """

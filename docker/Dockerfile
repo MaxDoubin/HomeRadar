@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend backend
 
-ENV HOMESENTRY_DB_PATH=/data/homesentry.db
+ENV HOMERADAR_DB_PATH=/data/homeradar.db
 VOLUME ["/data"]
 
 EXPOSE 8000

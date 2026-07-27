@@ -1,13 +1,13 @@
 # Install
 
-HomeSentry is in Phase 1 of development — the bootable ISO (Phase 5) doesn't exist yet.
+Home Radar is in Phase 1 of development — the bootable ISO (Phase 5) doesn't exist yet.
 For now, run it directly on any Linux machine or via Docker.
 
 ## Option A: Docker (recommended for now)
 
 ```bash
-git clone https://github.com/maxdoubin/homesentry.git
-cd homesentry
+git clone https://github.com/maxdoubin/homeradar.git
+cd homeradar
 docker compose -f docker/docker-compose.yml up --build
 ```
 
@@ -16,8 +16,8 @@ The dashboard/API will be reachable at `http://<machine-ip>:8000`.
 ## Option B: Run from source
 
 ```bash
-git clone https://github.com/maxdoubin/homesentry.git
-cd homesentry/backend
+git clone https://github.com/maxdoubin/homeradar.git
+cd homeradar/backend
 pip install -r requirements.txt
 sudo python3 main.py
 ```
