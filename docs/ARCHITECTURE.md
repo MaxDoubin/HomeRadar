@@ -11,10 +11,10 @@ backend/
 ├── main.py              FastAPI app + background discovery loop
 ├── config.py             Environment-driven settings
 ├── discovery/            ARP scanning, mDNS listening, port scanning, fingerprinting
-├── dns/                   DNS proxy + blocklist management (Phase 2)
-├── monitor/               Traffic analysis, threat intel, trust scoring (Phase 2-4)
-├── alerts/                Notifications + weekly email digest (Phase 4)
-├── api/                   REST routes (WebSocket added in Phase 3)
+├── dns/                   Concurrent DNS proxy + atomic blocklist management
+├── monitor/               Traffic analysis, AbuseIPDB/CISA intel, trust + anomalies
+├── alerts/                Deduplicated alerts + weekly email digest
+├── api/                   REST operations + live WebSocket snapshots
 └── db/                    SQLite schema + thin data-access layer
 ```
 
@@ -36,12 +36,24 @@ backend/
 7. `main.py` runs this pipeline on a timer (`HOMERADAR_ARP_SCAN_INTERVAL`, default 60s)
    and also exposes `POST /scan` to trigger a pass on demand.
 
+## Security and dashboard pipeline (implemented)
+
+DNS queries are attributed by client IP, evaluated against household device policy and
+the local blocklist, forwarded or denied, stored in `traffic_logs`, and reflected in
+alerts and trust scores. Passive flow observations can supplement DNS metadata when the
+network exposes those packets. Reputation checks are cached.
+
+The React dashboard consumes a single `/dashboard` snapshot plus `/ws` updates. Device
+authorization, alert resolution, traffic summaries, trust explanations, settings,
+blocklist updates, CISA KEV search, digest preview/send, and manual scans are API
+operations. A standalone kiosk view polls the lightweight status endpoint.
+
 ## Data model
 
-Single SQLite file (`backend/data/homeradar.db` by default), five tables:
-`devices`, `events`, `alerts`, `traffic_logs`, `trust_scores`. See
-`backend/db/schema.sql` for the full definitions. SQLite was chosen deliberately over a
-client-server database — it's zero-config and keeps the whole appliance a single
+Single SQLite file (`data/homeradar.db` by default) stores devices, events, alerts,
+traffic metadata, trust history, settings, threat cache, update metadata, CISA KEV data,
+and behavior baselines. See `backend/db/schema.sql` for the full definitions. SQLite was
+chosen deliberately over a client-server database - it is zero-config and keeps the whole appliance a single
 portable file, matching the "plug in and go" pitch.
 
 Device records include advertised model, services, discovery sources, fingerprint

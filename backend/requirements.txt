@@ -5,3 +5,4 @@ zeroconf>=0.132
 mac-vendor-lookup>=0.1.12
 pydantic>=2.7
 python-dotenv>=1.0
+dnslib>=0.9.25

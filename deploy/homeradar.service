@@ -1,0 +1,21 @@
+[Unit]
+Description=Home Radar network security appliance
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/homeradar
+EnvironmentFile=-/etc/homeradar/homeradar.env
+ExecStart=/opt/homeradar/.venv/bin/python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/homeradar
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

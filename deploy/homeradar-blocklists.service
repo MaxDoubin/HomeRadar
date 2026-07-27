@@ -1,0 +1,10 @@
+[Unit]
+Description=Update Home Radar DNS blocklists
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/homeradar
+EnvironmentFile=-/etc/homeradar/homeradar.env
+ExecStart=/opt/homeradar/.venv/bin/python scripts/update_blocklists.py

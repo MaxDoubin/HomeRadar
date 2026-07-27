@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+cd /opt/homeradar
+python3 -m venv .venv
+.venv/bin/python -m pip install --no-cache-dir -r backend/requirements.txt
+npm --prefix frontend install
+npm --prefix frontend run build
+
+mkdir -p /etc/homeradar /var/lib/homeradar
+cp deploy/homeradar.env.example /etc/homeradar/homeradar.env
+cp deploy/homeradar.service /etc/systemd/system/
+cp deploy/homeradar-blocklists.service /etc/systemd/system/
+cp deploy/homeradar-blocklists.timer /etc/systemd/system/
+systemctl enable homeradar.service homeradar-blocklists.timer
+
+cat >/etc/xdg/openbox/autostart <<'EOF'
+xset -dpms
+xset s off
+chromium --kiosk --no-first-run http://127.0.0.1:8000/kiosk/status-display.html &
+EOF
