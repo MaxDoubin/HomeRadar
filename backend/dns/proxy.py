@@ -13,6 +13,7 @@ from dnslib import DNSHeader, DNSRecord, QTYPE, RCODE
 from backend import config
 from backend.db import get_conn, models
 from backend.dns.blocklists import BlocklistManager
+from backend.dns.policy import evaluate_policy
 
 logger = logging.getLogger("homeradar.dns")
 
@@ -150,7 +151,10 @@ class DNSProxy:
             decision = inspect_query(payload, self.blocklists)
             with get_conn() as conn:
                 device = models.find_device_by_ip(conn, client_ip)
-            policy_blocked = bool(device and device["is_authorized"] == 2)
+                policy = models.get_device_policy(conn, device["id"]) if device else None
+            policy_decision = evaluate_policy(policy, decision.domain)
+            household_blocked = bool(device and device["is_authorized"] == 2)
+            policy_blocked = household_blocked or policy_decision.blocked
             if policy_blocked:
                 response = error_response(payload, RCODE.REFUSED)
             elif decision.blocked:
@@ -164,7 +168,11 @@ class DNSProxy:
                     domain=decision.domain,
                     was_blocked=decision.blocked or policy_blocked,
                     threat_level="warning" if decision.blocked else "none",
-                    threat_reason="device blocked by household" if policy_blocked else decision.reason,
+                    threat_reason=(
+                        "device blocked by household"
+                        if household_blocked
+                        else policy_decision.reason or decision.reason
+                    ),
                     query_type=decision.query_type,
                     bytes_sent=len(payload),
                     bytes_received=len(response),

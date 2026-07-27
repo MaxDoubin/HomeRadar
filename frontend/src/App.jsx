@@ -163,15 +163,22 @@ function Devices({ devices, onSelect, onScan, busy }) {
 function DeviceDrawer({ device, onClose, onUpdate }) {
   const [trust, setTrust] = useState(null);
   const [traffic, setTraffic] = useState([]);
+  const [policy, setPolicy] = useState(null);
+  const [findings, setFindings] = useState([]);
   useEffect(() => {
     if (!device) return;
     api(`/devices/${device.id}/trust`).then(setTrust).catch(() => {});
     api(`/devices/${device.id}/traffic?limit=30`).then(setTraffic).catch(() => {});
+    api(`/devices/${device.id}/policy`).then(setPolicy).catch(() => {});
+    api(`/devices/${device.id}/findings`).then(setFindings).catch(() => {});
   }, [device]);
   if (!device) return null;
   const changeState = async (state) => {
     const updated = await api(`/devices/${device.id}/authorization`, { method: "PATCH", body: JSON.stringify({ state }) });
     onUpdate(updated);
+  };
+  const savePolicy = async () => {
+    setPolicy(await api(`/devices/${device.id}/policy`, {method:"PUT",body:JSON.stringify(policy)}));
   };
   return <div className="drawer-backdrop" onClick={onClose}><aside className="drawer" onClick={(e) => e.stopPropagation()}>
     <button className="close" onClick={onClose}>×</button>
@@ -181,6 +188,8 @@ function DeviceDrawer({ device, onClose, onUpdate }) {
     <p className="subtle">{device.vendor || "Unknown manufacturer"} · {device.model || "Model unavailable"}</p>
     <div className="detail-grid"><div><span>IP ADDRESS</span><strong>{device.ip}</strong></div><div><span>MAC ADDRESS</span><strong>{device.mac}</strong></div><div><span>TRUST SCORE</span><strong className={tone(device.trust_score)}>{device.trust_score}/100</strong></div><div><span>CONFIDENCE</span><strong>{Math.round((device.fingerprint_confidence || 0) * 100)}%</strong></div></div>
     <div className="drawer-actions"><button className="primary" onClick={() => changeState(1)}>Authorize</button><button className="danger-button" onClick={() => changeState(2)}>Block</button><button onClick={() => changeState(0)}>Reset</button></div>
+    {policy && <section><h3>Internet policy</h3><label className="toggle-row"><span><b>Internet access</b><small>Pause DNS access for this device.</small></span><input type="checkbox" checked={policy.internet_enabled} onChange={(e)=>setPolicy({...policy,internet_enabled:e.target.checked})}/></label><div className="policy-times"><label><span>Pause from</span><input type="time" value={policy.block_start || ""} onChange={(e)=>setPolicy({...policy,block_start:e.target.value || null})}/></label><label><span>Until</span><input type="time" value={policy.block_end || ""} onChange={(e)=>setPolicy({...policy,block_end:e.target.value || null})}/></label></div><label className="domain-rule"><span>Blocked domains · comma separated</span><input value={(policy.blocked_domains || []).join(", ")} onChange={(e)=>setPolicy({...policy,blocked_domains:e.target.value.split(",").map(v=>v.trim()).filter(Boolean)})} placeholder="example.com, social.example"/></label><button onClick={savePolicy}>Save policy</button></section>}
+    <section><h3>Exposure findings</h3>{findings.map((finding)=><div className={`finding ${finding.severity}`} key={finding.id}><b>{finding.title}</b><p>{finding.description}</p><small>{finding.recommendation}</small></div>)}{!findings.length && <p className="subtle">No current exposure findings.</p>}</section>
     <section><h3>Trust breakdown</h3>{trust?.reasons?.map((reason) => <p className="reason" key={reason}>{reason}</p>) || <p className="subtle">Calculating…</p>}</section>
     <section><h3>Recent DNS activity</h3>{traffic.slice(0, 8).map((item) => <p className="traffic-line" key={item.id}><span>{item.domain || item.dest_ip}</span><b className={item.was_blocked ? "danger" : "good"}>{item.was_blocked ? "blocked" : "allowed"}</b></p>)}{!traffic.length && <p className="subtle">No traffic recorded yet.</p>}</section>
   </aside></div>;

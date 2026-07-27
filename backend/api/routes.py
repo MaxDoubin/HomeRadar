@@ -12,6 +12,7 @@ from backend.discovery.scan_runner import run_discovery_scan
 from backend.dns.blocklists import record_update_results
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
+from backend.monitor.exposure_audit import audit_all, audit_device
 from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
 from backend.maintenance import (
     backup_path,
@@ -52,6 +53,14 @@ class SetupRequest(BaseModel):
     digest_email: str = Field(default="", max_length=320)
     dns_upstream: str = Field(default="1.1.1.1", max_length=255)
     notifications_enabled: bool = True
+
+
+class DevicePolicyUpdate(BaseModel):
+    internet_enabled: bool = True
+    block_start: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    block_end: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    blocked_domains: list[str] = Field(default_factory=list, max_length=500)
+    allowed_domains: list[str] = Field(default_factory=list, max_length=500)
 
 
 @router.get("/status")
@@ -146,6 +155,32 @@ def get_device_trust(device_id: int):
     }
 
 
+@router.get("/devices/{device_id}/policy")
+def get_device_policy(device_id: int):
+    with get_conn() as conn:
+        if models.get_device(conn, device_id) is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return models.get_device_policy(conn, device_id)
+
+
+@router.put("/devices/{device_id}/policy")
+def update_device_policy(device_id: int, update: DevicePolicyUpdate):
+    try:
+        with get_conn() as conn:
+            return models.set_device_policy(conn, device_id, **update.model_dump())
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Device not found") from exc
+
+
+@router.get("/devices/{device_id}/findings")
+def get_device_findings(device_id: int):
+    with get_conn() as conn:
+        device = models.get_device(conn, device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return audit_device(conn, device)
+
+
 @router.get("/inventory/summary")
 def get_inventory_summary():
     """Counts by device type and top vendor for dashboard visualizations."""
@@ -199,6 +234,19 @@ def recalculate_trust():
         updates = recalculate_all(conn)
         household = household_score(conn)
     return {"devices": updates, "household": household}
+
+
+@router.get("/findings")
+def get_findings(unresolved_only: bool = True):
+    with get_conn() as conn:
+        return models.list_findings(conn, unresolved_only=unresolved_only)
+
+
+@router.post("/audit")
+def run_exposure_audit():
+    with get_conn() as conn:
+        findings = audit_all(conn)
+    return {"finding_count": len(findings), "findings": findings}
 
 
 @router.get("/blocklists")

@@ -60,3 +60,15 @@ filenames are validated before file access.
 The health endpoint checks the live database, data-volume free space, DNS settings,
 blocklist presence/freshness, latest discovery timestamp, and backup count. The dashboard
 surfaces degraded conditions without exposing credentials.
+
+## Device policy and exposure review
+
+Each inventoried device can pause internet access, define a recurring quiet-hour window,
+and add exact or parent-domain rules. Policy is enforced only for DNS handled by Home
+Radar; allow rules do not bypass the security blocklist.
+
+The exposure audit reuses ports already observed by fingerprinting. It reports concrete
+evidence such as an accepting Telnet, SMB, RTSP, FTP, HTTP, or Remote Desktop port and
+gives a hardening recommendation. It never attempts a password, exploit, or destructive
+probe and never claims that an open port proves a CVE. Current findings contribute an
+explainable penalty to the device trust score.

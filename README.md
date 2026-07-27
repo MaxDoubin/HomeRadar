@@ -13,7 +13,9 @@ Built for the [Congressional App Challenge](https://www.congressionalappchalleng
 **The integrated MVP foundation is implemented.** Home Radar combines advanced device
 discovery with a local DNS firewall, community blocklists, optional reputation feeds,
 behavior-based trust scoring, real-time alerts, weekly digests, and a responsive React
-dashboard. Docker, systemd, kiosk, and Debian live-ISO build paths are included.
+dashboard. Per-device internet pauses, quiet-hour schedules, custom domain rules, and
+non-invasive service-exposure findings add family controls without attempting passwords
+or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included.
 
 It remains development software until it completes real-network, old-hardware, DNS
 failover, and week-long reliability testing.

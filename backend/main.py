@@ -19,6 +19,7 @@ from backend.dns.blocklists import record_update_results
 from backend.dns.proxy import DNSProxy
 from backend.monitor.trust_scoring import recalculate_all
 from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
+from backend.monitor.exposure_audit import audit_all
 from backend.maintenance import backup_if_due, cleanup_database
 from backend.services import blocklists
 
@@ -44,6 +45,7 @@ async def _trust_loop():
     while True:
         try:
             with get_conn() as conn:
+                audit_all(conn)
                 recalculate_all(conn)
         except Exception:
             logger.exception("Trust score recalculation failed")

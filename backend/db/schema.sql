@@ -107,6 +107,31 @@ CREATE TABLE IF NOT EXISTS behavior_baselines (
     PRIMARY KEY (device_id, metric)
 );
 
+CREATE TABLE IF NOT EXISTS device_policies (
+    device_id       INTEGER PRIMARY KEY REFERENCES devices(id),
+    internet_enabled INTEGER NOT NULL DEFAULT 1,
+    block_start     TEXT,
+    block_end       TEXT,
+    blocked_domains TEXT,
+    allowed_domains TEXT,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS exposure_findings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id       INTEGER NOT NULL REFERENCES devices(id),
+    finding_key     TEXT NOT NULL,
+    severity        TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    description     TEXT NOT NULL,
+    recommendation  TEXT NOT NULL,
+    evidence        TEXT,
+    is_resolved     INTEGER NOT NULL DEFAULT 0,
+    first_seen      TEXT NOT NULL,
+    last_seen       TEXT NOT NULL,
+    UNIQUE(device_id, finding_key)
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_device ON alerts(device_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_device ON traffic_logs(device_id);
@@ -117,3 +142,5 @@ CREATE INDEX IF NOT EXISTS idx_traffic_created ON traffic_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_traffic_domain ON traffic_logs(domain);
 CREATE INDEX IF NOT EXISTS idx_traffic_blocked ON traffic_logs(was_blocked);
 CREATE INDEX IF NOT EXISTS idx_alerts_resolved_created ON alerts(is_resolved, created_at);
+CREATE INDEX IF NOT EXISTS idx_findings_device ON exposure_findings(device_id);
+CREATE INDEX IF NOT EXISTS idx_findings_open ON exposure_findings(is_resolved, severity);

@@ -60,6 +60,18 @@ def score_device(conn, device: dict) -> TrustResult:
     if alert_count:
         factors["unresolved alerts"] = -min(20, alert_count * 4)
 
+    findings = conn.execute(
+        """SELECT severity, COUNT(*) AS count FROM exposure_findings
+           WHERE device_id = ? AND is_resolved = 0 GROUP BY severity""",
+        (device["id"],),
+    ).fetchall()
+    finding_penalty = sum(
+        {"critical": 12, "warning": 5, "info": 1}.get(row["severity"], 1) * row["count"]
+        for row in findings
+    )
+    if finding_penalty:
+        factors["network exposure findings"] = -min(25, finding_penalty)
+
     score = max(0, min(100, 50 + sum(factors.values())))
     reasons = [f"{label}: {points:+d}" for label, points in factors.items()]
     return TrustResult(score, reasons or ["No behavior history yet"], factors)
