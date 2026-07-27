@@ -1,0 +1,309 @@
+# HomeSentry — Project Plan
+## Congressional App Challenge 2026 | NV-03 (Susie Lee) | Max Doubin
+
+---
+
+## The Pitch
+
+Every American family has an old laptop collecting dust. Meanwhile, home networks are
+completely invisible — families have no idea what devices are connected, what data is
+leaving their house, or whether they're exposed to threats. HomeSentry turns that
+forgotten device into a free, enterprise-grade network security appliance. Download,
+flash, plug in, protected.
+
+**Cost to the family: $0.**
+
+---
+
+## What HomeSentry Does
+
+### Core Features (MVP — Must Ship)
+
+1. **One-Click Install** — Bootable USB ISO (Debian-minimal based) that turns any old
+   laptop/desktop into a dedicated appliance. Also ships as a Docker one-liner for users
+   who want to run it alongside an existing OS.
+2. **Network Discovery & Device Inventory** — ARP scanning + mDNS/SSDP/UPnP passive
+   listening to auto-discover every device on the network. Fingerprints devices by MAC
+   OUI, hostname, open ports, and traffic behavior. Categorizes them (phone, smart TV,
+   IoT camera, laptop, unknown).
+3. **Live Dashboard** — Clean, responsive React web UI accessible from any phone or
+   laptop on the local network. Shows all devices, a household "security score" (0–100),
+   active alerts, and traffic stats. The old laptop's own screen shows a persistent status
+   display (green/yellow/red, device count, alert ticker).
+4. **New Device Alerts** — Instant browser push notification and dashboard alert when an
+   unknown device joins the network. "A new device just connected: Unknown — MAC
+   xx:xx:xx:xx:xx:xx. Authorize or block?"
+5. **DNS-Level Threat Blocking** — Built-in DNS proxy that blocks known malware domains,
+   phishing sites, and ad trackers using community blocklists (Steven Black's hosts,
+   OISD, etc.) plus threat intel feeds. Families get Pi-hole-level blocking with zero
+   setup.
+6. **Outbound Traffic Monitor** — Flags devices making connections to known-bad
+   IPs/domains (checked against AbuseIPDB, CISA Known Exploited Vulnerabilities catalog,
+   and community threat intel). Alerts like: "Your smart TV contacted 3 suspicious IPs in
+   the last hour."
+7. **Device Trust Scoring** — Each device earns a trust score over time based on
+   behavior: how much data it sends, where it connects, how often it phones home, whether
+   it communicates with other LAN devices unexpectedly. Anomalies drop the score and
+   trigger alerts.
+8. **Weekly Security Digest** — Automated email summary to the household: new devices
+   this week, blocked threats, trust score changes, and one actionable security tip.
+
+### Stretch Features (Post-MVP / 2.0 Story for Application)
+
+- ML anomaly detection (Isolation Forest or Autoencoder) on traffic patterns to catch
+  zero-day-style behavior without signature matching
+- Parental controls / screen time tracking per device
+- Bandwidth usage monitoring per device
+- Automatic vulnerability scanning of discovered devices (open ports, default
+  credentials check)
+- Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
+  detection)
+- Mobile companion app (React Native) for push notifications
+- Auto-update mechanism for blocklists and threat intel
+
+---
+
+## Technical Architecture
+
+```
+                    INTERNET
+                       |
+                   [ ROUTER ]
+                       |
+              [ OLD LAPTOP / PC ]
+              Running HomeSentry OS
+                       |
+          +-----------+-----------+
+          |           |           |
+       [Phone]    [Laptop]    [IoT TV]
+          |           |           |
+       (all traffic passes through
+        HomeSentry's DNS proxy;
+        ARP/passive monitoring
+        sees all LAN traffic)
+```
+
+### Stack
+
+| Layer | Technology |
+|---|---|
+| **OS Base** | Debian 12 Minimal (custom ISO via live-build) |
+| **Backend API** | Python 3.11+ / FastAPI |
+| **Network Discovery** | scapy (ARP), python-nmap, zeroconf (mDNS) |
+| **DNS Proxy** | dnsmasq or custom Python DNS server (dnspython) |
+| **Packet Analysis** | scapy + pyshark for deep inspection |
+| **Threat Intel** | AbuseIPDB API, CISA KEV JSON feed, community blocklists |
+| **Database** | SQLite (local, zero-config, portable) |
+| **Dashboard Frontend** | React 18 + Tailwind CSS + Recharts |
+| **Status Display** | Chromium kiosk mode on the appliance's own screen |
+| **Email Digest** | Python smtplib, Jinja2 templates |
+| **Process Management** | systemd services |
+| **Build System** | live-build (ISO), Docker Compose (container option) |
+
+### Network Positioning
+
+HomeSentry operates in **passive monitoring + DNS proxy** mode. It does not need to be
+inline (no bridging, no breaking the network). It:
+
+1. Runs on the LAN alongside all other devices
+2. Uses ARP scanning and passive sniffing (promiscuous mode) to observe traffic
+3. Acts as the network's DNS server (router's DHCP points clients to HomeSentry's IP for
+   DNS)
+4. This gives it visibility into every device's DNS queries (what domains they contact)
+   plus Layer 2/3 traffic metadata
+
+This means zero risk of breaking the family's internet if HomeSentry goes down — they
+just lose DNS for a moment and can switch back to the router's default.
+
+---
+
+## Development Timeline
+
+### Phase 1: Foundation — 2 weeks
+
+- [x] Initialize GitHub repo with README, LICENSE (MIT), CONTRIBUTING.md
+- [x] Set up Python project structure with FastAPI skeleton
+- [x] Build ARP scanner module (scapy) — discover all LAN devices
+- [x] Build MAC OUI lookup for device manufacturer identification
+- [x] Build device fingerprinting (MAC OUI + hostname + open ports = device type)
+- [x] Set up SQLite database schema (devices, events, alerts, traffic_logs, trust_scores)
+- [x] Build basic REST API: GET /devices, GET /alerts, GET /status
+- [ ] Test on your home network — verify it finds all your devices
+
+**Milestone: Plug in a machine, run a script, see every device on your network in the
+terminal.**
+
+### Phase 2: DNS Proxy & Threat Blocking — 2 weeks
+
+- [ ] Build DNS proxy server (intercept DNS queries, resolve or block)
+- [ ] Integrate community blocklists (auto-download and parse Steven Black, OISD)
+- [ ] Build blocklist update cron job
+- [ ] Log all DNS queries per device (store in SQLite)
+- [ ] Integrate AbuseIPDB API for IP reputation lookups
+- [ ] Integrate CISA KEV feed for known-bad infrastructure
+- [ ] Build outbound connection monitor (flag connections to bad IPs/domains)
+- [ ] New device detection + alert generation
+
+**Milestone: DNS blocking is live, malware domains are blocked, bad outbound connections
+are flagged.**
+
+### Phase 3: Dashboard — 3 weeks
+
+- [ ] React project setup with Tailwind
+- [ ] Dashboard home page: security score, device count, active alerts, 24h traffic
+      sparkline
+- [ ] Devices page: grid/list of all devices with type icon, name, IP, MAC, trust score,
+      last seen
+- [ ] Device detail page: DNS query history, traffic stats, trust score breakdown,
+      authorize/block
+- [ ] Alerts page: chronological feed with severity, device, description
+- [ ] Traffic page: per-device bandwidth, top domains, blocked queries chart
+- [ ] Settings page: email config, DNS settings, alert preferences
+- [ ] WebSocket for real-time updates (new device toast, live alert feed)
+- [ ] Network map visualization (D3.js force-directed graph showing devices and
+      connections)
+- [ ] Build kiosk status display for the appliance's own screen
+
+**Milestone: Full working dashboard accessible from any phone on the network.**
+
+### Phase 4: Trust Scoring & Intelligence — 2 weeks
+
+- [ ] Design trust scoring algorithm:
+  - Base score: 50 (new device)
+  - +points: recognized manufacturer, expected behavior, low outbound variance
+  - -points: contacts known-bad IPs, unusual DNS queries, high data volume, unexpected
+    LAN scanning
+- [ ] Historical behavior tracking per device
+- [ ] Anomaly flagging (device suddenly changes behavior pattern)
+- [ ] Weekly email digest builder (Jinja2 template, smtplib)
+- [ ] Security score calculation for the whole household (weighted average of all device
+      trust scores + blocked threats + open issues)
+
+**Milestone: Every device has a live trust score, household gets a weekly security
+email.**
+
+### Phase 5: Packaging & Polish — 2 weeks
+
+- [ ] Build Debian live ISO with live-build (auto-starts HomeSentry services on boot)
+- [ ] Build Docker Compose alternative install
+- [ ] Write one-page install guide (flash USB, boot, plug in ethernet, open dashboard)
+- [ ] First-run setup wizard in the dashboard (set household name, email for digest,
+      confirm DNS)
+- [ ] 3D print a small case badge or stand for the "HomeSentry appliance" look (optional
+      but nice)
+- [ ] Test on multiple old machines (different specs, architectures)
+- [ ] Test on your home network for a full week in production mode
+- [ ] Write full README with screenshots, architecture diagram, install steps
+
+**Milestone: Anyone can download the ISO, flash it, and be running in under 10 minutes.**
+
+### Phase 6: Demo & Submission — 2 weeks
+
+- [ ] Record demo video (under 2 minutes):
+  - Show the old laptop, explain it was collecting dust
+  - Flash the USB, boot HomeSentry
+  - Plug in ethernet
+  - Open dashboard on phone — devices appear
+  - Show a blocked threat in real time
+  - Show the Flipper Zero attempting an attack, HomeSentry catching it
+  - Show the security score, the network map, the weekly digest
+  - End with the pitch: "$0. Open source. Every family."
+- [ ] Take cover photo (dashboard on phone with the appliance in background, 600x800
+      JPEG 3:4)
+- [ ] Fill out all application fields
+- [ ] Push final code to GitHub (clean commits, good README, MIT license)
+- [ ] Opt in for Hack Club Congressional Certification (open source requirement met)
+- [ ] Submit before October 26
+
+---
+
+## Application Answers (Draft Outlines)
+
+**What is your app called?**
+HomeSentry
+
+**Programming languages:**
+Python, JavaScript
+
+**Platform:**
+Web
+
+**What does your app do? (400 words)**
+Core angles: turns e-waste into security appliance, $0 cost, network discovery, DNS
+threat blocking, device trust scoring, real-time dashboard, weekly digest, open source.
+
+**What inspired you? (400 words)**
+Core angles: You have a petabyte homelab with enterprise gear — your neighbors have
+nothing. You did a formal network security risk assessment of your school (South CTA
+PBL). You're a Henderson Blue Ribbon Commissioner and see digital equity gaps firsthand.
+You teach at youth coding camps and know most families have zero network visibility.
+50M tons of e-waste per year. You wanted to fix both problems at once.
+
+**Technical difficulties? (400 words)**
+Core angles: Passive monitoring without being inline, DNS proxy reliability, device
+fingerprinting accuracy, building a full Linux ISO from scratch, making it work on
+wildly different old hardware, balancing security depth with a UI your grandparents can
+understand.
+
+**2.0 improvements? (400 words)**
+Core angles: ML anomaly detection, mobile app, Flipper Zero integration for attack
+detection, parental controls, automatic vulnerability scanning, mesh support for larger
+homes, community threat sharing between HomeSentry nodes.
+
+**Did you use AI?**
+Yes — used Claude for architecture planning, code review, debugging, and documentation.
+All core logic (network scanning, DNS proxy, trust scoring algorithm, dashboard design)
+was designed and implemented by me. AI was a development tool, not the developer.
+
+**What did you learn? (400 words)**
+Core angles: Linux system engineering, network protocol internals, threat intelligence
+pipelines, full-stack development, open-source community building, turning a real-world
+problem you care about into software anyone can use.
+
+---
+
+## Key Risks & Mitigations
+
+| Risk | Mitigation |
+|---|---|
+| Old hardware compatibility | Test on 3+ machines of different ages; Debian supports nearly everything |
+| DNS proxy breaks family internet | Failsafe: if HomeSentry DNS goes down, devices fall back to router DNS via DHCP timeout |
+| Judges can't test it live | Demo video shows full plug-in-and-go flow; GitHub README has Docker one-liner for instant test |
+| Scope creep | MVP features are locked above; ML and mobile app are explicitly "2.0" stretch goals |
+| Threat intel API rate limits | Cache AbuseIPDB lookups in SQLite; CISA KEV is a static JSON file (no rate limit) |
+
+---
+
+## Resources Needed
+
+- [x] GitHub repo (free)
+- [ ] AbuseIPDB API key (free tier: 1,000 lookups/day — plenty for a home network)
+- [ ] One old laptop/desktop for primary testing (you have plenty of gear)
+- [ ] Your homelab for development
+- [ ] USB flash drive for ISO testing
+- [ ] Flipper Zero for attack demo (you have this)
+- [ ] Optional: Raspberry Pi for secondary deployment target
+- [ ] Phone for recording demo video
+
+---
+
+## Competition Differentiators
+
+1. **$0 cost** — No other security product does this. Firewalla is $200+. Pi-hole
+   requires a Pi. HomeSentry requires nothing you don't already own.
+2. **E-waste repurposing** — Environmental angle that resonates with congressional
+   offices.
+3. **Truly open source (MIT)** — Qualifies for Hack Club Congressional Certification.
+4. **Real hardware + software** — Not just a web app. Physical appliance built from
+   recycled hardware.
+5. **Enterprise concepts made accessible** — Network monitoring, threat intel, trust
+   scoring — concepts from your CTE program, made family-friendly.
+6. **Proven personal story** — You already presented a network security assessment to
+   school administration. This is the logical next step.
+7. **Live demo potential** — At #HouseOfCode, plug it into the venue's network and map it
+   in real time in front of Congress.
+
+---
+
+*Last updated: July 27, 2026*
+*Congressional App Challenge Deadline: October 26, 2026*

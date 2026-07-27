@@ -1,0 +1,16 @@
+services:
+  homesentry:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: homesentry
+    restart: unless-stopped
+    network_mode: host   # needed to see the real LAN for ARP/mDNS discovery
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    volumes:
+      - homesentry-data:/data
+
+volumes:
+  homesentry-data:
