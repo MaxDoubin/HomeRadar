@@ -8,6 +8,9 @@ dependencies and zero network calls.
 """
 from __future__ import annotations
 
+from functools import lru_cache
+import re
+
 _FALLBACK_OUI = {
     "F0:18:98": "Apple",
     "AC:BC:32": "Apple",
@@ -29,6 +32,17 @@ _FALLBACK_OUI = {
     "B0:C5:54": "TP-Link",
     "50:C7:BF": "TP-Link",
     "00:0C:29": "VMware",
+    "00:50:56": "VMware",
+    "08:00:27": "Oracle VirtualBox",
+    "00:11:32": "Synology",
+    "24:0A:C4": "Espressif",
+    "24:6F:28": "Espressif",
+    "30:AE:A4": "Espressif",
+    "84:F3:EB": "Espressif",
+    "78:8A:20": "Ubiquiti",
+    "FC:EC:DA": "Ubiquiti",
+    "24:A4:3C": "Ubiquiti",
+    "00:14:22": "Dell",
 }
 
 _mac_lookup = None
@@ -45,14 +59,31 @@ def _get_backend():
     return _mac_lookup
 
 
+def normalize_mac(mac: str) -> str | None:
+    compact = re.sub(r"[^0-9a-fA-F]", "", mac)
+    if len(compact) != 12:
+        return None
+    return ":".join(compact[index:index + 2] for index in range(0, 12, 2)).upper()
+
+
+@lru_cache(maxsize=4096)
 def lookup_vendor(mac: str) -> str | None:
     """Best-effort vendor name for a MAC address, or None if unknown."""
+    normalized = normalize_mac(mac)
+    if normalized is None:
+        return None
+    first_octet = int(normalized[:2], 16)
+    if first_octet & 0x01:
+        return None  # multicast/broadcast addresses do not identify a vendor
+    if first_octet & 0x02:
+        return "Private / randomized MAC"
+
     backend = _get_backend()
     if backend:
         try:
-            return backend.lookup(mac)
+            return backend.lookup(normalized)
         except Exception:
             pass  # fall through to the offline table
 
-    prefix = mac.upper().replace("-", ":")[:8]
+    prefix = normalized[:8]
     return _FALLBACK_OUI.get(prefix)

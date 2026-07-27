@@ -125,9 +125,11 @@ just lose DNS for a moment and can switch back to the router's default.
 - [x] Set up Python project structure with FastAPI skeleton
 - [x] Build ARP scanner module (scapy) — discover all LAN devices
 - [x] Build MAC OUI lookup for device manufacturer identification
-- [x] Build device fingerprinting (MAC OUI + hostname + open ports = device type)
+- [x] Build multi-signal device fingerprinting (OUI + hostname + ports + mDNS + SSDP)
+- [x] Add mDNS/DNS-SD, SSDP/UPnP, and neighbor-cache discovery
 - [x] Set up SQLite database schema (devices, events, alerts, traffic_logs, trust_scores)
 - [x] Build basic REST API: GET /devices, GET /alerts, GET /status
+- [x] Add inventory summary API and fingerprint evidence/confidence
 - [ ] Test on your home network — verify it finds all your devices
 
 **Milestone: Plug in a machine, run a script, see every device on your network in the

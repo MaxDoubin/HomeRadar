@@ -36,6 +36,13 @@ def get_device(device_id: int):
     return device
 
 
+@router.get("/inventory/summary")
+def get_inventory_summary():
+    """Counts by device type and top vendor for dashboard visualizations."""
+    with get_conn() as conn:
+        return models.inventory_summary(conn)
+
+
 @router.get("/alerts")
 def get_alerts(unresolved_only: bool = False):
     with get_conn() as conn:

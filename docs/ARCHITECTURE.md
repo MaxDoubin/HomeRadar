@@ -18,18 +18,22 @@ backend/
 └── db/                    SQLite schema + thin data-access layer
 ```
 
-## Discovery pipeline (Phase 1, implemented)
+## Discovery pipeline (Phase 1+, implemented)
 
-1. `discovery/arp_scanner.py` broadcasts ARP requests across the local subnet and
-   collects `{ip, mac}` pairs for every host that responds.
-2. `discovery/device_fingerprint.py` enriches each host: `oui_lookup.py` resolves the MAC
-   vendor, `port_scanner.py` probes a curated list of consumer/IoT ports, and a
-   hostname reverse-lookup is attempted. A small rule-based classifier turns those
-   signals into a device category (phone, smart_tv, iot_camera, printer, computer,
-   unknown).
-3. `discovery/scan_runner.py` orchestrates one full pass: scan → fingerprint → persist
-   via `db/models.py` → raise a `new_device` alert the first time a MAC is seen.
-4. `main.py` runs this pipeline on a timer (`HOMERADAR_ARP_SCAN_INTERVAL`, default 60s)
+1. `arp_scanner.py` actively identifies LAN hosts and stable MAC addresses.
+2. `neighbor_scanner.py` reads the operating system's ARP/neighbor cache, providing a
+   no-root fallback and finding devices the active broadcast may miss.
+3. `mdns_scanner.py` browses common DNS-SD services advertised by printers, AirPlay,
+   Cast, Sonos, HomeKit/Matter, cameras, NAS devices, and smart-home hubs.
+4. `ssdp_scanner.py` sends a standard UPnP discovery request and captures device types,
+   product/server strings, and stable identifiers from routers, media devices, cameras,
+   and consoles.
+5. `scan_runner.py` correlates all four sources by IP and MAC, fingerprints hosts
+   concurrently, persists results, and raises detailed first-seen alerts.
+6. `device_fingerprint.py` scores independent vendor, name/model, port, mDNS, and SSDP
+   evidence. It stores the winning category, confidence, competing scores, and evidence
+   rather than returning an unexplained guess.
+7. `main.py` runs this pipeline on a timer (`HOMERADAR_ARP_SCAN_INTERVAL`, default 60s)
    and also exposes `POST /scan` to trigger a pass on demand.
 
 ## Data model
@@ -39,6 +43,10 @@ Single SQLite file (`backend/data/homeradar.db` by default), five tables:
 `backend/db/schema.sql` for the full definitions. SQLite was chosen deliberately over a
 client-server database — it's zero-config and keeps the whole appliance a single
 portable file, matching the "plug in and go" pitch.
+
+Device records include advertised model, services, discovery sources, fingerprint
+confidence, and JSON evidence. Startup performs additive schema migration so existing
+Phase 1 databases gain these fields without losing inventory or authorization state.
 
 ## Why passive + DNS proxy, not inline
 
