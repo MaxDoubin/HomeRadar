@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# HomeSentry runtime data
+backend/data/
+*.db
+*.db-journal
+
+# Frontend
+node_modules/
+frontend/dist/
+frontend/build/
+
+# ISO build artifacts
+iso/build/
+*.iso
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
