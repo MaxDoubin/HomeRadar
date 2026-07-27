@@ -9,7 +9,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 
-logger = logging.getLogger("homesentry.arp_scanner")
+logger = logging.getLogger("homeradar.arp_scanner")
 
 
 def detect_local_subnet() -> str | None:

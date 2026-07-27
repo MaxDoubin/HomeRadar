@@ -8,7 +8,7 @@ from backend.db import models
 from backend.discovery.arp_scanner import scan as arp_scan
 from backend.discovery.device_fingerprint import fingerprint_device
 
-logger = logging.getLogger("homesentry.scan_runner")
+logger = logging.getLogger("homeradar.scan_runner")
 
 
 def run_discovery_scan(conn) -> list[dict]:

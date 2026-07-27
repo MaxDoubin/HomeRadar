@@ -1,4 +1,4 @@
-"""HomeSentry backend entrypoint: FastAPI app + background discovery loop."""
+"""Home Radar backend entrypoint: FastAPI app + background discovery loop."""
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +14,7 @@ from backend.db import get_conn, init_db
 from backend.discovery.scan_runner import run_discovery_scan
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("homesentry.main")
+logger = logging.getLogger("homeradar.main")
 
 
 async def _discovery_loop():
@@ -37,7 +37,7 @@ async def lifespan(app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="HomeSentry", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Home Radar", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

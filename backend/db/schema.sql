@@ -1,4 +1,4 @@
--- HomeSentry SQLite schema: devices, events, alerts, traffic_logs, trust_scores
+-- Home Radar SQLite schema: devices, events, alerts, traffic_logs, trust_scores
 
 CREATE TABLE IF NOT EXISTS devices (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,

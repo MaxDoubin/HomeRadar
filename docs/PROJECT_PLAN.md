@@ -1,4 +1,4 @@
-# HomeSentry — Project Plan
+# Home Radar — Project Plan
 ## Congressional App Challenge 2026 | NV-03 (Susie Lee) | Max Doubin
 
 ---
@@ -7,7 +7,7 @@
 
 Every American family has an old laptop collecting dust. Meanwhile, home networks are
 completely invisible — families have no idea what devices are connected, what data is
-leaving their house, or whether they're exposed to threats. HomeSentry turns that
+leaving their house, or whether they're exposed to threats. Home Radar turns that
 forgotten device into a free, enterprise-grade network security appliance. Download,
 flash, plug in, protected.
 
@@ -15,7 +15,7 @@ flash, plug in, protected.
 
 ---
 
-## What HomeSentry Does
+## What Home Radar Does
 
 ### Core Features (MVP — Must Ship)
 
@@ -71,14 +71,14 @@ flash, plug in, protected.
                    [ ROUTER ]
                        |
               [ OLD LAPTOP / PC ]
-              Running HomeSentry OS
+              Running Home Radar OS
                        |
           +-----------+-----------+
           |           |           |
        [Phone]    [Laptop]    [IoT TV]
           |           |           |
        (all traffic passes through
-        HomeSentry's DNS proxy;
+        Home Radar's DNS proxy;
         ARP/passive monitoring
         sees all LAN traffic)
 ```
@@ -102,17 +102,17 @@ flash, plug in, protected.
 
 ### Network Positioning
 
-HomeSentry operates in **passive monitoring + DNS proxy** mode. It does not need to be
+Home Radar operates in **passive monitoring + DNS proxy** mode. It does not need to be
 inline (no bridging, no breaking the network). It:
 
 1. Runs on the LAN alongside all other devices
 2. Uses ARP scanning and passive sniffing (promiscuous mode) to observe traffic
-3. Acts as the network's DNS server (router's DHCP points clients to HomeSentry's IP for
+3. Acts as the network's DNS server (router's DHCP points clients to Home Radar's IP for
    DNS)
 4. This gives it visibility into every device's DNS queries (what domains they contact)
    plus Layer 2/3 traffic metadata
 
-This means zero risk of breaking the family's internet if HomeSentry goes down — they
+This means zero risk of breaking the family's internet if Home Radar goes down — they
 just lose DNS for a moment and can switch back to the router's default.
 
 ---
@@ -184,12 +184,12 @@ email.**
 
 ### Phase 5: Packaging & Polish — 2 weeks
 
-- [ ] Build Debian live ISO with live-build (auto-starts HomeSentry services on boot)
+- [ ] Build Debian live ISO with live-build (auto-starts Home Radar services on boot)
 - [ ] Build Docker Compose alternative install
 - [ ] Write one-page install guide (flash USB, boot, plug in ethernet, open dashboard)
 - [ ] First-run setup wizard in the dashboard (set household name, email for digest,
       confirm DNS)
-- [ ] 3D print a small case badge or stand for the "HomeSentry appliance" look (optional
+- [ ] 3D print a small case badge or stand for the "Home Radar appliance" look (optional
       but nice)
 - [ ] Test on multiple old machines (different specs, architectures)
 - [ ] Test on your home network for a full week in production mode
@@ -201,11 +201,11 @@ email.**
 
 - [ ] Record demo video (under 2 minutes):
   - Show the old laptop, explain it was collecting dust
-  - Flash the USB, boot HomeSentry
+  - Flash the USB, boot Home Radar
   - Plug in ethernet
   - Open dashboard on phone — devices appear
   - Show a blocked threat in real time
-  - Show the Flipper Zero attempting an attack, HomeSentry catching it
+  - Show the Flipper Zero attempting an attack, Home Radar catching it
   - Show the security score, the network map, the weekly digest
   - End with the pitch: "$0. Open source. Every family."
 - [ ] Take cover photo (dashboard on phone with the appliance in background, 600x800
@@ -220,7 +220,7 @@ email.**
 ## Application Answers (Draft Outlines)
 
 **What is your app called?**
-HomeSentry
+Home Radar
 
 **Programming languages:**
 Python, JavaScript
@@ -248,7 +248,7 @@ understand.
 **2.0 improvements? (400 words)**
 Core angles: ML anomaly detection, mobile app, Flipper Zero integration for attack
 detection, parental controls, automatic vulnerability scanning, mesh support for larger
-homes, community threat sharing between HomeSentry nodes.
+homes, community threat sharing between Home Radar nodes.
 
 **Did you use AI?**
 Yes — used Claude for architecture planning, code review, debugging, and documentation.
@@ -267,7 +267,7 @@ problem you care about into software anyone can use.
 | Risk | Mitigation |
 |---|---|
 | Old hardware compatibility | Test on 3+ machines of different ages; Debian supports nearly everything |
-| DNS proxy breaks family internet | Failsafe: if HomeSentry DNS goes down, devices fall back to router DNS via DHCP timeout |
+| DNS proxy breaks family internet | Failsafe: if Home Radar DNS goes down, devices fall back to router DNS via DHCP timeout |
 | Judges can't test it live | Demo video shows full plug-in-and-go flow; GitHub README has Docker one-liner for instant test |
 | Scope creep | MVP features are locked above; ML and mobile app are explicitly "2.0" stretch goals |
 | Threat intel API rate limits | Cache AbuseIPDB lookups in SQLite; CISA KEV is a static JSON file (no rate limit) |
@@ -290,7 +290,7 @@ problem you care about into software anyone can use.
 ## Competition Differentiators
 
 1. **$0 cost** — No other security product does this. Firewalla is $200+. Pi-hole
-   requires a Pi. HomeSentry requires nothing you don't already own.
+   requires a Pi. Home Radar requires nothing you don't already own.
 2. **E-waste repurposing** — Environmental angle that resonates with congressional
    offices.
 3. **Truly open source (MIT)** — Qualifies for Hack Club Congressional Certification.
