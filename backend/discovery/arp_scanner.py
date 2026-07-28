@@ -91,8 +91,9 @@ def _active_neighbor_scan(network: ipaddress.IPv4Network, timeout: float) -> lis
 
 def _raw_arp_scan(network: ipaddress.IPv4Network, timeout: float) -> list[dict]:
     try:
-        from scapy.all import ARP, Ether, srp
         from scapy.error import Scapy_Exception
+        from scapy.layers.l2 import ARP, Ether
+        from scapy.sendrecv import srp
     except ImportError:
         logger.info("Scapy is unavailable; using active neighbor discovery")
         return []
