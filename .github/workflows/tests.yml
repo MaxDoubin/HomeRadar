@@ -107,5 +107,42 @@ jobs:
           tags: homeradar:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Inspect image configuration
-        run: docker image inspect homeradar:test >/dev/null
+      - name: Start hardened appliance
+        run: |
+          docker run -d \
+            --name homeradar-test \
+            --cap-drop ALL \
+            --cap-add NET_RAW \
+            --cap-add NET_BIND_SERVICE \
+            --security-opt no-new-privileges:true \
+            --read-only \
+            --tmpfs /tmp:size=64m,mode=1777 \
+            -p 18000:8000 \
+            -e HOMERADAR_DNS_ENABLED=true \
+            -e HOMERADAR_DNS_PORT=53 \
+            -e HOMERADAR_BLOCKLIST_AUTO_UPDATE=false \
+            -v homeradar-test-data:/data \
+            homeradar:test
+      - name: Wait for healthy API
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18000/health >/dev/null; then
+              docker inspect --format='user={{.Config.User}} status={{.State.Status}}' homeradar-test
+              exit 0
+            fi
+            if ! docker inspect --format='{{.State.Running}}' homeradar-test | grep -q true; then
+              docker logs homeradar-test
+              exit 1
+            fi
+            sleep 1
+          done
+          docker logs homeradar-test
+          exit 1
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs homeradar-test || true
+      - name: Clean up smoke test
+        if: always()
+        run: |
+          docker rm -f homeradar-test || true
+          docker volume rm homeradar-test-data || true
