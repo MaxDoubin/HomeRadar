@@ -1,10 +1,30 @@
 [Unit]
 Description=Update Home Radar DNS blocklists
+Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-User=root
+User=homeradar
+Group=homeradar
 WorkingDirectory=/opt/homeradar
 EnvironmentFile=-/etc/homeradar/homeradar.env
 ExecStart=/opt/homeradar/.venv/bin/python scripts/update_blocklists.py
+UMask=0077
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/homeradar
