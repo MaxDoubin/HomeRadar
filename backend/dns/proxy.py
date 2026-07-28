@@ -1,16 +1,16 @@
-"""Concurrent UDP DNS proxy with blocking, device attribution, and query logging."""
+"""Concurrent UDP/TCP DNS proxy with blocking, attribution, and safe failure behavior."""
 from __future__ import annotations
 
-import logging
 import ipaddress
+import json
+import logging
 import socket
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-import json
-from dnslib import DNSHeader, DNSRecord, QTYPE, RCODE, RR, A, AAAA
+from dnslib import A, AAAA, DNSHeader, DNSRecord, QTYPE, RCODE, RR
 
 from backend import config
 from backend.db import get_conn, models
@@ -19,6 +19,7 @@ from backend.dns.cache import DNSCache, cache_key
 from backend.dns.policy import evaluate_policy
 
 logger = logging.getLogger("homeradar.dns")
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,26 @@ def error_response(payload: bytes, rcode: int = RCODE.NXDOMAIN) -> bytes:
 
 def blocked_response(payload: bytes) -> bytes:
     return error_response(payload, RCODE.NXDOMAIN)
+
+
+def client_is_allowed(client_ip: str) -> bool:
+    """Refuse public-source clients unless explicitly enabled.
+
+    Home Radar is a household resolver, not a public recursive DNS service.
+    RFC1918/ULA, loopback, link-local, and carrier-grade NAT ranges are accepted.
+    """
+    if config.DNS_ALLOW_PUBLIC_CLIENTS:
+        return True
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    return (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or (address.version == 4 and address in _CGNAT)
+    )
 
 
 class DNSProxy:
@@ -228,7 +249,9 @@ class DNSProxy:
             return None
         try:
             records = json.loads(custom_records)
-        except Exception:
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(records, dict):
             return None
 
         request = DNSRecord.parse(payload)
@@ -237,9 +260,8 @@ class DNSProxy:
 
         question = request.questions[0]
         domain = str(question.qname).rstrip(".").lower()
-
         ip_str = records.get(domain)
-        if not ip_str:
+        if not isinstance(ip_str, str) or not ip_str:
             return None
 
         try:
@@ -250,39 +272,67 @@ class DNSProxy:
         qtype = question.qtype
         reply = request.reply()
         added = False
-
         if ip.version == 4 and qtype in (QTYPE.A, QTYPE.ANY):
-            reply.add_answer(RR(rname=question.qname, rtype=QTYPE.A, rclass=1, ttl=300, rdata=A(ip_str)))
+            reply.add_answer(
+                RR(rname=question.qname, rtype=QTYPE.A, rclass=1, ttl=300, rdata=A(ip_str))
+            )
             added = True
         elif ip.version == 6 and qtype in (QTYPE.AAAA, QTYPE.ANY):
-            reply.add_answer(RR(rname=question.qname, rtype=QTYPE.AAAA, rclass=1, ttl=300, rdata=AAAA(ip_str)))
+            reply.add_answer(
+                RR(rname=question.qname, rtype=QTYPE.AAAA, rclass=1, ttl=300, rdata=AAAA(ip_str))
+            )
             added = True
+        return reply.pack() if added else None
 
-        if added:
-            return reply.pack()
-        return None
+    def _safe_error(self, payload: bytes, rcode: int) -> bytes | None:
+        try:
+            return error_response(payload, rcode)
+        except Exception:
+            return None
 
     def _process(self, payload: bytes, client_ip: str) -> bytes | None:
-        response: bytes | None = None
+        if not client_is_allowed(client_ip):
+            logger.warning("Refusing DNS request from non-local client %s", client_ip)
+            return self._safe_error(payload, RCODE.REFUSED)
+
         try:
             decision = inspect_query(payload, self.blocklists)
+        except Exception:
+            logger.debug("Invalid DNS request from %s", client_ip, exc_info=True)
+            return self._safe_error(payload, RCODE.FORMERR)
+
+        try:
             with get_conn() as conn:
                 device = models.find_device_by_ip(conn, client_ip)
                 policy = models.get_device_policy(conn, device["id"]) if device else None
                 custom_dns_records = models.get_setting(conn, "custom_dns_records")
-            policy_decision = evaluate_policy(policy, decision.domain)
-            household_blocked = bool(device and device["is_authorized"] == 2)
-            policy_blocked = household_blocked or policy_decision.blocked
-            if policy_blocked:
-                response = error_response(payload, RCODE.REFUSED)
-            elif decision.blocked:
-                response = blocked_response(payload)
+        except Exception:
+            logger.exception("Could not load DNS policy for %s", client_ip)
+            return self._safe_error(payload, RCODE.SERVFAIL)
+
+        policy_decision = evaluate_policy(policy, decision.domain)
+        household_blocked = bool(device and device["is_authorized"] == 2)
+        policy_blocked = household_blocked or policy_decision.blocked
+
+        if policy_blocked:
+            response = self._safe_error(payload, RCODE.REFUSED)
+        elif decision.blocked:
+            response = self._safe_error(payload, RCODE.NXDOMAIN)
+        else:
+            custom_response = self._check_custom_dns(payload, custom_dns_records)
+            if custom_response:
+                response = custom_response
             else:
-                custom_response = self._check_custom_dns(payload, custom_dns_records)
-                if custom_response:
-                    response = custom_response
-                else:
+                try:
                     response = self._resolve(payload)
+                except Exception:
+                    logger.warning("DNS upstream resolution failed for %s", decision.domain, exc_info=True)
+                    response = self._safe_error(payload, RCODE.SERVFAIL)
+
+        if response is None:
+            return None
+
+        try:
             with get_conn() as conn:
                 models.log_traffic(
                     conn,
@@ -308,11 +358,10 @@ class DNSProxy:
                         description=f"{client_ip} requested {decision.domain}",
                     )
         except Exception:
-            logger.debug("DNS query handling failed for %s", client_ip, exc_info=True)
-            try:
-                response = self._forward(payload)
-            except OSError:
-                response = None
+            # Observability must never reverse a policy decision. Return the
+            # response already selected even if SQLite is temporarily busy.
+            logger.warning("Could not record DNS request for %s", client_ip, exc_info=True)
+
         return response
 
     def _handle(self, payload: bytes, client: tuple[str, int]) -> None:
@@ -344,6 +393,8 @@ class DNSProxy:
             connection.settimeout(config.DNS_TIMEOUT_SECONDS)
             try:
                 size = int.from_bytes(self._receive_exact(connection, 2), "big")
+                if size <= 0 or size > 65535:
+                    return
                 payload = self._receive_exact(connection, size)
                 response = self._process(payload, client_ip)
                 if response:
