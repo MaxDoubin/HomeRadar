@@ -58,16 +58,26 @@ function getBackendExecutablePath() {
 }
 
 function stopBackend() {
-  if (!backendProcess || backendProcess.killed) return;
+  if (!backendProcess || backendProcess.killed) {
+    backendProcess = null;
+    backendPort = null;
+    return;
+  }
   try {
     backendProcess.kill(process.platform === "win32" ? undefined : "SIGTERM");
   } catch (error) {
     console.error("Could not stop backend", error);
   }
   backendProcess = null;
+  backendPort = null;
 }
 
 async function startBackend() {
+  if (backendProcess && backendPort) {
+    await waitForBackend(backendPort, 5000);
+    return;
+  }
+
   const backendPath = getBackendExecutablePath();
   if (!fs.existsSync(backendPath)) {
     throw new Error(`The bundled Home Radar backend is missing: ${backendPath}`);
@@ -88,27 +98,38 @@ async function startBackend() {
     PYTHONUNBUFFERED: "1",
   };
 
+  const selectedPort = backendPort;
   backendProcess = spawn(backendPath, [], {
     env: environment,
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
 
-  backendProcess.stdout?.on("data", (data) => console.log(`[backend] ${data}`));
-  backendProcess.stderr?.on("data", (data) => console.error(`[backend] ${data}`));
-  backendProcess.on("error", (error) => console.error("Backend process failed", error));
-  backendProcess.on("exit", (code, signal) => {
+  const spawnedProcess = backendProcess;
+  spawnedProcess.stdout?.on("data", (data) => console.log(`[backend] ${data}`));
+  spawnedProcess.stderr?.on("data", (data) => console.error(`[backend] ${data}`));
+  spawnedProcess.on("error", (error) => console.error("Backend process failed", error));
+  spawnedProcess.on("exit", (code, signal) => {
     console.log(`Backend exited with code ${code} and signal ${signal}`);
-    backendProcess = null;
+    if (backendProcess === spawnedProcess) {
+      backendProcess = null;
+      backendPort = null;
+    }
     if (!quitting && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.loadFile(path.join(__dirname, "error.html"));
     }
   });
 
-  await waitForBackend(backendPort);
+  await waitForBackend(selectedPort);
 }
 
 async function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 860,
@@ -137,6 +158,7 @@ async function createWindow() {
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => {
     mainWindow = null;
+    if (!quitting) stopBackend();
   });
 
   try {
@@ -158,6 +180,8 @@ if (!hasSingleInstanceLock) {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
+    } else {
+      createWindow();
     }
   });
 
