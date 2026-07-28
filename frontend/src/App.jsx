@@ -115,7 +115,7 @@ function Overview({ data, onNavigate, onSelect }) {
     <section className="overview-grid">
       <article className="score-card card">
         <ScoreRing score={status.security_score ?? 100} />
-        <div><span>Household security</span><h2>{status.security_score >= 85 ? "Looking strong" : status.security_score >= 65 ? "Needs attention" : "Action recommended"}</h2><p>{status.open_alert_count || 0} open alerts across {status.device_count || 0} devices.</p></div>
+        <div><span>Household security</span><h2>{(status.security_score ?? 100) >= 85 ? "Looking strong" : (status.security_score ?? 100) >= 65 ? "Needs attention" : "Action recommended"}</h2><p>{status.open_alert_count || 0} open alerts across {status.device_count || 0} devices.</p></div>
       </article>
       <div className="stats-grid">
         <Stat label="DEVICES" value={status.device_count || 0} detail={`${pending} awaiting review`} />
