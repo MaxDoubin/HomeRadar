@@ -36,10 +36,8 @@ function pairingScreen() {
   if (pairingOverlay) return pairingOverlay.promise;
 
   let resolvePairing;
-  let rejectPairing;
-  const promise = new Promise((resolve, reject) => {
+  const promise = new Promise((resolve) => {
     resolvePairing = resolve;
-    rejectPairing = reject;
   });
 
   const style = document.createElement("style");
@@ -103,6 +101,7 @@ function pairingScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
+        cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.token) {
@@ -123,7 +122,7 @@ function pairingScreen() {
   });
   queueMicrotask(() => input.focus());
 
-  pairingOverlay = { promise, reject: rejectPairing, cleanup };
+  pairingOverlay = { promise, cleanup };
   return promise;
 }
 
@@ -201,9 +200,9 @@ export function dashboardSocket(onSnapshot) {
     if (wrapper.closed) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const root = import.meta.env.VITE_WS_ROOT || `${protocol}//${window.location.host}`;
-    const token = getStoredToken();
-    const url = `${root}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
-    const socket = new WebSocket(url);
+    // Browser WebSocket APIs cannot set custom headers. Authentication is sent
+    // through the strict same-site cookie, keeping the token out of URLs/logs.
+    const socket = new WebSocket(`${root}/ws`);
     wrapper.socket = socket;
     socket.onmessage = (event) => {
       const payload = JSON.parse(event.data);
