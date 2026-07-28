@@ -35,10 +35,9 @@ def create_backup(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
             ).fetchone()
             if settings_exists:
-                placeholders = ",".join("?" for _ in _SECRET_SETTING_KEYS)
-                destination.execute(
-                    f"DELETE FROM settings WHERE key IN ({placeholders})",
-                    _SECRET_SETTING_KEYS,
+                destination.executemany(
+                    "DELETE FROM settings WHERE key = ?",
+                    ((key,) for key in _SECRET_SETTING_KEYS),
                 )
                 destination.commit()
             check = destination.execute("PRAGMA quick_check").fetchone()[0]
