@@ -35,7 +35,18 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q backend tests
       - name: Run backend tests
-        run: python -m pytest tests/ --strict-markers
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest tests/ --strict-markers --tb=short 2>&1 | tee pytest-${{ matrix.python }}.log
+      - name: Preserve backend test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-python-${{ matrix.python }}
+          path: pytest-${{ matrix.python }}.log
+          if-no-files-found: error
+          retention-days: 7
 
   frontend:
     name: Web dashboard
@@ -103,7 +114,9 @@ jobs:
         run: xcodegen generate
       - name: Compile app and tests for simulator
         working-directory: mobile/ios/HomeRadar
+        shell: bash
         run: |
+          set -o pipefail
           xcodebuild \
             -project HomeRadar.xcodeproj \
             -scheme HomeRadar \
@@ -111,7 +124,15 @@ jobs:
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
-            build-for-testing
+            build-for-testing 2>&1 | tee xcodebuild.log
+      - name: Preserve Xcode build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: mobile/ios/HomeRadar/xcodebuild.log
+          if-no-files-found: error
+          retention-days: 7
 
   docker:
     name: Docker appliance
