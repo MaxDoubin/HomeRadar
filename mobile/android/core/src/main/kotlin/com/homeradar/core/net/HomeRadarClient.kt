@@ -37,14 +37,23 @@ class HomeRadarClient(
 ) {
     private fun url(path: String): String = baseUrl.trimEnd('/') + path
 
-    /**
-     * The single attach-point for auth on every outgoing request. Nothing in
-     * this class should set the auth header any other way.
-     */
+    /** The single attach-point for auth on every outgoing request. */
     private fun Request.Builder.attachAuth(): Request.Builder {
-        tokenProvider.currentToken()?.let { header(AUTH_HEADER_NAME, it) }
+        tokenProvider.currentToken()?.takeIf { it.isNotBlank() }?.let {
+            header(AUTH_HEADER_NAME, it)
+        }
         return this
     }
+
+    /**
+     * Builds the authenticated WebSocket upgrade request. The token is carried
+     * in the same header as REST requests so it never appears in URLs or logs.
+     */
+    internal fun webSocketRequest(path: String = "/ws"): Request =
+        Request.Builder()
+            .url(buildWsUrl(baseUrl, path))
+            .attachAuth()
+            .build()
 
     private suspend fun execute(request: Request): Response =
         withContext(Dispatchers.IO) { httpClient.newCall(request).execute() }
