@@ -8,6 +8,10 @@ const path = require("path");
 let backendProcess = null;
 let mainWindow = null;
 let backendPort = null;
+let backendLogPath = null;
+let backendLogStream = null;
+let backendOutput = [];
+let backendExitDescription = "";
 let quitting = false;
 
 function getFreePort() {
@@ -24,6 +28,30 @@ function getFreePort() {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function recordBackendOutput(prefix, data) {
+  const text = `${prefix}${String(data)}`;
+  backendOutput.push(text);
+  if (backendOutput.length > 120) backendOutput = backendOutput.slice(-120);
+  backendLogStream?.write(text);
+}
+
+function getBackendDiagnosticText(error) {
+  const details = backendOutput.join("").trim();
+  const pieces = [error?.message, backendExitDescription, details].filter(Boolean);
+  return pieces.join("\n\n").slice(-12000) || "The backend exited without producing diagnostic output.";
+}
+
+async function showStartupError(error) {
+  const query = {
+    message: error?.message || "The Home Radar backend could not start.",
+    details: getBackendDiagnosticText(error),
+    logPath: backendLogPath || "No log file was created.",
+  };
+  await mainWindow.loadFile(path.join(__dirname, "error.html"), { query });
+  mainWindow.show();
+  dialog.showErrorBox("Home Radar could not start", `${query.message}\n\nLog: ${query.logPath}`);
 }
 
 async function waitForBackend(port, timeoutMilliseconds = 45000) {
@@ -44,7 +72,9 @@ async function waitForBackend(port, timeoutMilliseconds = 45000) {
       request.on("error", () => resolve(false));
     });
     if (available) return;
-    if (backendProcess === null) throw new Error("The Home Radar backend exited during startup.");
+    if (backendProcess === null) {
+      throw new Error(backendExitDescription || "The Home Radar backend exited during startup.");
+    }
     await delay(250);
   }
   throw new Error("The Home Radar backend did not become ready within 45 seconds.");
@@ -57,10 +87,18 @@ function getBackendExecutablePath() {
     : path.join(__dirname, "resources", executable);
 }
 
+function closeBackendLog() {
+  if (backendLogStream) {
+    backendLogStream.end();
+    backendLogStream = null;
+  }
+}
+
 function stopBackend() {
   if (!backendProcess || backendProcess.killed) {
     backendProcess = null;
     backendPort = null;
+    closeBackendLog();
     return;
   }
   try {
@@ -70,6 +108,7 @@ function stopBackend() {
   }
   backendProcess = null;
   backendPort = null;
+  closeBackendLog();
 }
 
 async function startBackend() {
@@ -85,6 +124,13 @@ async function startBackend() {
 
   backendPort = await getFreePort();
   const dataDirectory = app.getPath("userData");
+  fs.mkdirSync(dataDirectory, { recursive: true });
+  backendLogPath = path.join(dataDirectory, "backend.log");
+  backendLogStream = fs.createWriteStream(backendLogPath, { flags: "a" });
+  backendLogStream.write(`\n\n=== Home Radar startup ${new Date().toISOString()} ===\n`);
+  backendOutput = [];
+  backendExitDescription = "";
+
   const environment = {
     ...process.env,
     HOMERADAR_API_HOST: "127.0.0.1",
@@ -106,17 +152,27 @@ async function startBackend() {
   });
 
   const spawnedProcess = backendProcess;
-  spawnedProcess.stdout?.on("data", (data) => console.log(`[backend] ${data}`));
-  spawnedProcess.stderr?.on("data", (data) => console.error(`[backend] ${data}`));
-  spawnedProcess.on("error", (error) => console.error("Backend process failed", error));
+  spawnedProcess.stdout?.on("data", (data) => {
+    recordBackendOutput("[stdout] ", data);
+    console.log(`[backend] ${data}`);
+  });
+  spawnedProcess.stderr?.on("data", (data) => {
+    recordBackendOutput("[stderr] ", data);
+    console.error(`[backend] ${data}`);
+  });
+  spawnedProcess.on("error", (error) => {
+    backendExitDescription = `Backend process failed: ${error.message}`;
+    recordBackendOutput("[process error] ", `${error.stack || error.message}\n`);
+  });
   spawnedProcess.on("exit", (code, signal) => {
-    console.log(`Backend exited with code ${code} and signal ${signal}`);
+    backendExitDescription = `Backend exited with code ${code ?? "unknown"} and signal ${signal ?? "none"}.`;
+    recordBackendOutput("[process] ", `${backendExitDescription}\n`);
     if (backendProcess === spawnedProcess) {
       backendProcess = null;
       backendPort = null;
     }
     if (!quitting && mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.loadFile(path.join(__dirname, "error.html"));
+      showStartupError(new Error(backendExitDescription)).catch(console.error);
     }
   });
 
@@ -153,7 +209,7 @@ async function createWindow() {
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const allowed = `http://127.0.0.1:${backendPort}`;
-    if (!url.startsWith(allowed)) event.preventDefault();
+    if (!url.startsWith(allowed) && !url.startsWith("file://")) event.preventDefault();
   });
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.on("closed", () => {
@@ -166,9 +222,7 @@ async function createWindow() {
     await mainWindow.loadURL(`http://127.0.0.1:${backendPort}`);
   } catch (error) {
     console.error("Home Radar startup failed", error);
-    await mainWindow.loadFile(path.join(__dirname, "error.html"));
-    mainWindow.show();
-    dialog.showErrorBox("Home Radar could not start", error.message);
+    await showStartupError(error);
   }
 }
 

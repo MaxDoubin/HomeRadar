@@ -179,4 +179,7 @@ if frontend_dist.exists():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("backend.main:app", host=config.API_HOST, port=config.API_PORT, reload=False)
+    # Pass the already-imported ASGI object. A string such as
+    # ``backend.main:app`` asks Uvicorn to import this source module again, which
+    # is unreliable once PyInstaller freezes this file as ``__main__``.
+    uvicorn.run(app, host=config.API_HOST, port=config.API_PORT, reload=False)

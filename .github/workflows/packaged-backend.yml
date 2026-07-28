@@ -1,0 +1,56 @@
+name: Packaged Backend Smoke Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaged-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows x64
+            executable: dist/homeradar-backend.exe
+          - os: ubuntu-latest
+            label: Linux x64
+            executable: dist/homeradar-backend
+          - os: macos-15-intel
+            label: macOS Intel
+            executable: dist/homeradar-backend
+          - os: macos-15
+            label: macOS Apple Silicon
+            executable: dist/homeradar-backend
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Build frozen backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt pyinstaller
+          python -m PyInstaller --clean --noconfirm --name homeradar-backend --onefile backend/main.py
+
+      - name: Launch frozen backend and verify health
+        run: python scripts/smoke_packaged_backend.py "${{ matrix.executable }}"
