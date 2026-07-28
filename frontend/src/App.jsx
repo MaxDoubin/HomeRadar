@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { api, dashboardSocket } from "./api";
+import { api, dashboardSocket, setStoredToken } from "./api";
 
 const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings"];
 const deviceGlyphs = {
@@ -235,11 +235,24 @@ function Settings() {
   const [message, setMessage] = useState("");
   const [health, setHealth] = useState(null);
   const [backups, setBackups] = useState([]);
+  const [pairing, setPairing] = useState(null); // {code, expiresAt}
+  const [pairError, setPairError] = useState("");
+  const [pairBusy, setPairBusy] = useState(false);
+  const [regenMessage, setRegenMessage] = useState("");
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const refreshSystem = () => {
     api("/health").then(setHealth);
     api("/backups").then((result)=>setBackups(result.backups));
   };
   useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
+  useEffect(() => {
+    if (!pairing) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [pairing]);
+  const pairRemaining = pairing ? Math.max(0, Math.round((pairing.expiresAt - now) / 1000)) : 0;
+  useEffect(() => { if (pairing && pairRemaining <= 0) setPairing(null); }, [pairRemaining, pairing]);
   const save = async (event) => {
     event.preventDefault();
     if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
@@ -247,6 +260,31 @@ function Settings() {
     }
     setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
     setMessage("Settings saved");
+  };
+  const startPairing = async () => {
+    setPairBusy(true);
+    setPairError("");
+    try {
+      const result = await api("/pair/start", { method: "POST" });
+      setPairing({ code: result.code, expiresAt: Date.now() + result.expires_in * 1000 });
+    } catch (err) {
+      setPairError(err.message);
+    } finally {
+      setPairBusy(false);
+    }
+  };
+  const regenerateToken = async () => {
+    setRegenBusy(true);
+    setRegenMessage("");
+    try {
+      const result = await api("/pair/regenerate", { method: "POST" });
+      setStoredToken(result.token);
+      setRegenMessage("Token regenerated");
+    } catch (err) {
+      setRegenMessage(err.message);
+    } finally {
+      setRegenBusy(false);
+    }
   };
   return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household, DNS, and digest preferences.</p></div></div>
     <div className="settings-grid"><form className="card settings-form" onSubmit={save}>
@@ -260,6 +298,20 @@ function Settings() {
       {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
       <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
       {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
+    </aside>
+    <aside className="card system-card pairing-card">
+      <p className="eyebrow">DEVICE PAIRING</p>
+      <h2>Pair a mobile device</h2>
+      <p className="subtle">Generate a one-time code to link a phone or tablet to this appliance.</p>
+      {pairing
+        ? <div className="pairing-code-block"><strong className="pairing-code">{pairing.code}</strong><small>Expires in {pairRemaining}s</small></div>
+        : <button onClick={startPairing} disabled={pairBusy}>{pairBusy ? "Generating…" : "Generate pairing code"}</button>}
+      {pairError && <p className="health-warning">! {pairError}</p>}
+      <div className="toggle-row">
+        <span><b>Rotate access token</b><small>Invalidate the current token and mint a new one.</small></span>
+      </div>
+      <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
+      {regenMessage && <p className={regenMessage === "Token regenerated" ? "good" : "health-warning"}>{regenMessage === "Token regenerated" ? regenMessage : `! ${regenMessage}`}</p>}
     </aside></div>
   </section>;
 }

@@ -1,0 +1,10 @@
+<resources>
+    <!--
+      Plain platform theme, deliberately not an AppCompat/Material Components
+      theme: the whole UI is Jetpack Compose (setContent { MaterialTheme { ... } }),
+      so this manifest theme only needs to cover the brief pre-Compose window
+      background, and using the platform theme avoids pulling in a whole
+      separate Material Components Android library just for this one line.
+    -->
+    <style name="Theme.HomeRadar" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

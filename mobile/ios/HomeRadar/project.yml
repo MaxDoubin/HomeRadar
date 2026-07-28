@@ -1,0 +1,60 @@
+name: HomeRadar
+options:
+  bundleIdPrefix: org.homeradar
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  HomeRadar:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HomeRadar
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: HomeRadar
+        UILaunchScreen: {}
+        # Required for ApplianceDiscovery's NWBrowser Bonjour scan: iOS's
+        # Local Network privacy prompt shows this string, and only fires
+        # for service types listed under NSBonjourServices.
+        NSLocalNetworkUsageDescription: >-
+          HomeRadar scans your local network for your HomeRadar security
+          appliance so you can pair with it.
+        NSBonjourServices:
+          - _http._tcp
+        # The appliance is plain http:// with no TLS. NSAllowsLocalNetworking
+        # permits non-secure loads to IP-literal / .local / no-dot LAN
+        # hostnames without the blanket NSAllowsArbitraryLoads exception.
+        # If a household enters a public/non-local-looking hostname, ATS may
+        # still block it -- ATS's "local networking" carve-out is a
+        # heuristic, not a guarantee, so revisit this if that turns out to
+        # be a real-world problem.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.homeradar.app
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+  HomeRadarTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: HomeRadarTests
+    dependencies:
+      - target: HomeRadar
+schemes:
+  HomeRadar:
+    build:
+      targets:
+        HomeRadar: all
+        HomeRadarTests: [test]
+    test:
+      targets:
+        - HomeRadarTests
+    run:
+      config: Debug

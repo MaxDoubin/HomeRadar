@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
 from backend import config
+from backend import pairing
 from backend.alerts.email_digest import build_digest, send_digest
 from backend.db import get_conn, models
 from backend.discovery.scan_runner import run_discovery_scan
@@ -21,6 +22,7 @@ from backend.maintenance import (
     list_backups,
     prune_backups,
 )
+from backend.pairing import require_token
 from backend.services import blocklists
 from backend import services
 
@@ -54,6 +56,10 @@ class SetupRequest(BaseModel):
     digest_email: str = Field(default="", max_length=320)
     dns_upstream: str = Field(default="1.1.1.1", max_length=255)
     notifications_enabled: bool = True
+
+
+class PairClaimRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=16)
 
 
 class DevicePolicyUpdate(BaseModel):
@@ -123,7 +129,7 @@ def get_device(device_id: int):
     return device
 
 
-@router.patch("/devices/{device_id}/authorization")
+@router.patch("/devices/{device_id}/authorization", dependencies=[Depends(require_token)])
 def update_device_authorization(device_id: int, update: AuthorizationUpdate):
     with get_conn() as conn:
         if not models.set_device_authorization(conn, device_id, update.state):
@@ -164,7 +170,7 @@ def get_device_policy(device_id: int):
         return models.get_device_policy(conn, device_id)
 
 
-@router.put("/devices/{device_id}/policy")
+@router.put("/devices/{device_id}/policy", dependencies=[Depends(require_token)])
 def update_device_policy(device_id: int, update: DevicePolicyUpdate):
     try:
         with get_conn() as conn:
@@ -195,7 +201,7 @@ def get_alerts(unresolved_only: bool = False):
         return models.list_alerts(conn, unresolved_only=unresolved_only)
 
 
-@router.patch("/alerts/{alert_id}")
+@router.patch("/alerts/{alert_id}", dependencies=[Depends(require_token)])
 def update_alert(alert_id: int, update: AlertUpdate):
     with get_conn() as conn:
         if not models.resolve_alert(conn, alert_id, update.resolved):
@@ -215,7 +221,7 @@ def get_traffic_summary(hours: int = 24):
         return models.traffic_summary(conn, hours=hours)
 
 
-@router.post("/traffic/observe")
+@router.post("/traffic/observe", dependencies=[Depends(require_token)])
 def observe_connection(observation: ConnectionObservation):
     """Ingest a connection seen by a packet collector or router integration."""
     with get_conn() as conn:
@@ -229,7 +235,7 @@ def observe_connection(observation: ConnectionObservation):
     return {**result, "reputation": result["reputation"].__dict__}
 
 
-@router.post("/trust/recalculate")
+@router.post("/trust/recalculate", dependencies=[Depends(require_token)])
 def recalculate_trust():
     with get_conn() as conn:
         updates = recalculate_all(conn)
@@ -243,7 +249,7 @@ def get_findings(unresolved_only: bool = True):
         return models.list_findings(conn, unresolved_only=unresolved_only)
 
 
-@router.post("/audit")
+@router.post("/audit", dependencies=[Depends(require_token)])
 def run_exposure_audit():
     with get_conn() as conn:
         findings = audit_all(conn)
@@ -268,7 +274,7 @@ def get_dns_stats():
     return {"running": True, **services.dns_proxy.stats()}
 
 
-@router.post("/dns/cache/clear")
+@router.post("/dns/cache/clear", dependencies=[Depends(require_token)])
 def clear_dns_cache():
     if services.dns_proxy is None:
         raise HTTPException(status_code=503, detail="DNS proxy is not running")
@@ -276,7 +282,7 @@ def clear_dns_cache():
     return {"cleared": True, "cache": services.dns_proxy.cache.stats()}
 
 
-@router.post("/blocklists/update")
+@router.post("/blocklists/update", dependencies=[Depends(require_token)])
 def update_blocklists():
     results = blocklists.update()
     with get_conn() as conn:
@@ -293,7 +299,7 @@ def get_cisa_kev(query: str = "", limit: int = 100):
         return search_catalog(conn, query=query, limit=limit)
 
 
-@router.post("/threat-intel/cisa-kev/update")
+@router.post("/threat-intel/cisa-kev/update", dependencies=[Depends(require_token)])
 def refresh_cisa_kev():
     try:
         with get_conn() as conn:
@@ -317,7 +323,7 @@ def get_settings():
     }
 
 
-@router.patch("/settings")
+@router.patch("/settings", dependencies=[Depends(require_token)])
 def update_settings(update: SettingsUpdate):
     values = {
         key: str(value).lower() if isinstance(value, bool) else value
@@ -367,14 +373,14 @@ def get_backups():
     return {"backups": list_backups(), "retention": config.BACKUP_RETENTION_COUNT}
 
 
-@router.post("/backups")
+@router.post("/backups", dependencies=[Depends(require_token)])
 def create_database_backup():
     path = create_backup()
     prune_backups()
     return {"backup": next(item for item in list_backups() if item["name"] == path.name)}
 
 
-@router.get("/backups/{name}")
+@router.get("/backups/{name}", dependencies=[Depends(require_token)])
 def download_database_backup(name: str):
     path = backup_path(name)
     if path is None:
@@ -389,7 +395,7 @@ def preview_digest():
     return {"subject": subject, "body": body}
 
 
-@router.post("/digest/send")
+@router.post("/digest/send", dependencies=[Depends(require_token)])
 def send_security_digest():
     try:
         with get_conn() as conn:
@@ -398,9 +404,48 @@ def send_security_digest():
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
-@router.post("/scan")
+@router.post("/scan", dependencies=[Depends(require_token)])
 def trigger_scan():
     """Manually trigger a discovery pass (ARP scan + fingerprinting)."""
     with get_conn() as conn:
         found = run_discovery_scan(conn)
     return {"devices_found": len(found), "devices": found}
+
+
+@router.post("/pair/start")
+def start_pairing():
+    """Issue a short-lived pairing code, meant to be read off the dashboard
+    or kiosk screen and typed into a mobile device to claim an API token."""
+    with get_conn() as conn:
+        return pairing.issue_pairing_code(conn)
+
+
+@router.get("/pair/status")
+def get_pairing_status():
+    with get_conn() as conn:
+        return pairing.pairing_status(conn)
+
+
+@router.post("/pair/claim")
+def claim_pairing(request: PairClaimRequest):
+    with get_conn() as conn:
+        token = pairing.redeem_pairing_code(conn, request.code)
+    if token is None:
+        raise HTTPException(status_code=400, detail="Invalid, expired, or locked-out pairing code")
+    return {"token": token}
+
+
+@router.get("/pair/local-token")
+def get_local_token():
+    """Lets the already-LAN-trusted browser dashboard self-provision a token
+    without the human pairing-code ceremony meant for new mobile devices."""
+    with get_conn() as conn:
+        return {"token": pairing.get_or_create_token(conn)}
+
+
+@router.post("/pair/regenerate", dependencies=[Depends(require_token)])
+def regenerate_pairing_token():
+    """Invalidate the current token and mint a new one. Requires the current
+    token so a stranger can't lock the household out of their own appliance."""
+    with get_conn() as conn:
+        return {"token": pairing.regenerate_token(conn)}
