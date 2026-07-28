@@ -1,4 +1,4 @@
-# Home Radar — Project Plan
+# Home Radar - Project Plan
 ## Congressional App Challenge 2026 | NV-03 (Susie Lee) | Max Doubin
 
 ---
@@ -6,7 +6,7 @@
 ## The Pitch
 
 Every American family has an old laptop collecting dust. Meanwhile, home networks are
-completely invisible — families have no idea what devices are connected, what data is
+completely invisible - families have no idea what devices are connected, what data is
 leaving their house, or whether they're exposed to threats. Home Radar turns that
 forgotten device into a free, enterprise-grade network security appliance. Download,
 flash, plug in, protected.
@@ -17,35 +17,35 @@ flash, plug in, protected.
 
 ## What Home Radar Does
 
-### Core Features (MVP — Must Ship)
+### Core Features (MVP - Must Ship)
 
-1. **One-Click Install** — Bootable USB ISO (Debian-minimal based) that turns any old
+1. **One-Click Install** - Bootable USB ISO (Debian-minimal based) that turns any old
    laptop/desktop into a dedicated appliance. Also ships as a Docker one-liner for users
    who want to run it alongside an existing OS.
-2. **Network Discovery & Device Inventory** — ARP scanning + mDNS/SSDP/UPnP passive
+2. **Network Discovery & Device Inventory** - ARP scanning + mDNS/SSDP/UPnP passive
    listening to auto-discover every device on the network. Fingerprints devices by MAC
    OUI, hostname, open ports, and traffic behavior. Categorizes them (phone, smart TV,
    IoT camera, laptop, unknown).
-3. **Live Dashboard** — Clean, responsive React web UI accessible from any phone or
+3. **Live Dashboard** - Clean, responsive React web UI accessible from any phone or
    laptop on the local network. Shows all devices, a household "security score" (0–100),
    active alerts, and traffic stats. The old laptop's own screen shows a persistent status
    display (green/yellow/red, device count, alert ticker).
-4. **New Device Alerts** — Instant browser push notification and dashboard alert when an
-   unknown device joins the network. "A new device just connected: Unknown — MAC
+4. **New Device Alerts** - Instant browser push notification and dashboard alert when an
+   unknown device joins the network. "A new device just connected: Unknown - MAC
    xx:xx:xx:xx:xx:xx. Authorize or block?"
-5. **DNS-Level Threat Blocking** — Built-in DNS proxy that blocks known malware domains,
+5. **DNS-Level Threat Blocking** - Built-in DNS proxy that blocks known malware domains,
    phishing sites, and ad trackers using community blocklists (Steven Black's hosts,
    OISD, etc.) plus threat intel feeds. Families get Pi-hole-level blocking with zero
    setup.
-6. **Outbound Traffic Monitor** — Flags devices making connections to known-bad
+6. **Outbound Traffic Monitor** - Flags devices making connections to known-bad
    IPs/domains (checked against AbuseIPDB, CISA Known Exploited Vulnerabilities catalog,
    and community threat intel). Alerts like: "Your smart TV contacted 3 suspicious IPs in
    the last hour."
-7. **Device Trust Scoring** — Each device earns a trust score over time based on
+7. **Device Trust Scoring** - Each device earns a trust score over time based on
    behavior: how much data it sends, where it connects, how often it phones home, whether
    it communicates with other LAN devices unexpectedly. Anomalies drop the score and
    trigger alerts.
-8. **Weekly Security Digest** — Automated email summary to the household: new devices
+8. **Weekly Security Digest** - Automated email summary to the household: new devices
    this week, blocked threats, trust score changes, and one actionable security tip.
 
 ### Stretch Features (Post-MVP / 2.0 Story for Application)
@@ -111,30 +111,30 @@ inline (no bridging, no breaking the network). It:
 4. This gives it visibility into every device's DNS queries (what domains they contact)
    plus Layer 2/3 traffic metadata
 
-This means zero risk of breaking the family's internet if Home Radar goes down — they
+This means zero risk of breaking the family's internet if Home Radar goes down - they
 just lose DNS for a moment and can switch back to the router's default.
 
 ---
 
 ## Development Timeline
 
-### Phase 1: Foundation — 2 weeks
+### Phase 1: Foundation - 2 weeks
 
 - [x] Initialize GitHub repo with README, LICENSE (MIT), CONTRIBUTING.md
 - [x] Set up Python project structure with FastAPI skeleton
-- [x] Build ARP scanner module (scapy) — discover all LAN devices
+- [x] Build ARP scanner module (scapy) - discover all LAN devices
 - [x] Build MAC OUI lookup for device manufacturer identification
 - [x] Build multi-signal device fingerprinting (OUI + hostname + ports + mDNS + SSDP)
 - [x] Add mDNS/DNS-SD, SSDP/UPnP, and neighbor-cache discovery
 - [x] Set up SQLite database schema (devices, events, alerts, traffic_logs, trust_scores)
 - [x] Build basic REST API: GET /devices, GET /alerts, GET /status
 - [x] Add inventory summary API and fingerprint evidence/confidence
-- [ ] Test on your home network — verify it finds all your devices
+- [ ] Test on your home network - verify it finds all your devices
 
 **Milestone: Plug in a machine, run a script, see every device on your network in the
 terminal.**
 
-### Phase 2: DNS Proxy & Threat Blocking — 2 weeks
+### Phase 2: DNS Proxy & Threat Blocking - 2 weeks
 
 - [x] Build DNS proxy server (intercept DNS queries, resolve or block)
 - [x] Integrate community blocklists (auto-download and parse Steven Black, OISD)
@@ -148,7 +148,7 @@ terminal.**
 **Milestone: DNS blocking is live, malware domains are blocked, bad outbound connections
 are flagged.**
 
-### Phase 3: Dashboard — 3 weeks
+### Phase 3: Dashboard - 3 weeks
 
 - [x] React project setup with responsive custom CSS
 - [x] Dashboard home page: security score, device count, active alerts, 24h traffic
@@ -166,7 +166,7 @@ are flagged.**
 
 **Milestone: Full working dashboard accessible from any phone on the network.**
 
-### Phase 4: Trust Scoring & Intelligence — 2 weeks
+### Phase 4: Trust Scoring & Intelligence - 2 weeks
 
 - [x] Design explainable trust scoring algorithm:
   - Base score: 50 (new device)
@@ -182,7 +182,7 @@ are flagged.**
 **Milestone: Every device has a live trust score, household gets a weekly security
 email.**
 
-### Phase 5: Packaging & Polish — 2 weeks
+### Phase 5: Packaging & Polish - 2 weeks
 
 - [x] Add Debian live ISO build configuration (physical boot validation remains)
 - [x] Build Docker Compose alternative install
@@ -197,13 +197,13 @@ email.**
 
 **Milestone: Anyone can download the ISO, flash it, and be running in under 10 minutes.**
 
-### Phase 6: Demo & Submission — 2 weeks
+### Phase 6: Demo & Submission - 2 weeks
 
 - [ ] Record demo video (under 2 minutes):
   - Show the old laptop, explain it was collecting dust
   - Flash the USB, boot Home Radar
   - Plug in ethernet
-  - Open dashboard on phone — devices appear
+  - Open dashboard on phone - devices appear
   - Show a blocked threat in real time
   - Show the Flipper Zero attempting an attack, Home Radar catching it
   - Show the security score, the network map, the weekly digest
@@ -233,7 +233,7 @@ Core angles: turns e-waste into security appliance, $0 cost, network discovery, 
 threat blocking, device trust scoring, real-time dashboard, weekly digest, open source.
 
 **What inspired you? (400 words)**
-Core angles: You have a petabyte homelab with enterprise gear — your neighbors have
+Core angles: You have a petabyte homelab with enterprise gear - your neighbors have
 nothing. You did a formal network security risk assessment of your school (South CTA
 PBL). You're a Henderson Blue Ribbon Commissioner and see digital equity gaps firsthand.
 You teach at youth coding camps and know most families have zero network visibility.
@@ -251,7 +251,7 @@ detection, parental controls, automatic vulnerability scanning, mesh support for
 homes, community threat sharing between Home Radar nodes.
 
 **Did you use AI?**
-Yes — used Claude for architecture planning, code review, debugging, and documentation.
+Yes - used Claude for architecture planning, code review, debugging, and documentation.
 All core logic (network scanning, DNS proxy, trust scoring algorithm, dashboard design)
 was designed and implemented by me. AI was a development tool, not the developer.
 
@@ -277,7 +277,7 @@ problem you care about into software anyone can use.
 ## Resources Needed
 
 - [x] GitHub repo (free)
-- [ ] AbuseIPDB API key (free tier: 1,000 lookups/day — plenty for a home network)
+- [ ] AbuseIPDB API key (free tier: 1,000 lookups/day - plenty for a home network)
 - [ ] One old laptop/desktop for primary testing (you have plenty of gear)
 - [ ] Your homelab for development
 - [ ] USB flash drive for ISO testing
@@ -289,18 +289,18 @@ problem you care about into software anyone can use.
 
 ## Competition Differentiators
 
-1. **$0 cost** — No other security product does this. Firewalla is $200+. Pi-hole
+1. **$0 cost** - No other security product does this. Firewalla is $200+. Pi-hole
    requires a Pi. Home Radar requires nothing you don't already own.
-2. **E-waste repurposing** — Environmental angle that resonates with congressional
+2. **E-waste repurposing** - Environmental angle that resonates with congressional
    offices.
-3. **Truly open source (MIT)** — Qualifies for Hack Club Congressional Certification.
-4. **Real hardware + software** — Not just a web app. Physical appliance built from
+3. **Truly open source (MIT)** - Qualifies for Hack Club Congressional Certification.
+4. **Real hardware + software** - Not just a web app. Physical appliance built from
    recycled hardware.
-5. **Enterprise concepts made accessible** — Network monitoring, threat intel, trust
-   scoring — concepts from your CTE program, made family-friendly.
-6. **Proven personal story** — You already presented a network security assessment to
+5. **Enterprise concepts made accessible** - Network monitoring, threat intel, trust
+   scoring - concepts from your CTE program, made family-friendly.
+6. **Proven personal story** - You already presented a network security assessment to
    school administration. This is the logical next step.
-7. **Live demo potential** — At #HouseOfCode, plug it into the venue's network and map it
+7. **Live demo potential** - At #HouseOfCode, plug it into the venue's network and map it
    in real time in front of Congress.
 
 ---

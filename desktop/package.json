@@ -1,0 +1,53 @@
+{
+  "name": "homeradar-desktop",
+  "version": "1.0.0",
+  "description": "Home Radar Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\"",
+    "build": "electron-builder --publish always"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.homeradar.desktop",
+    "productName": "Home Radar",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    },
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": ".",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "publish": [
+      "github"
+    ]
+  },
+  "dependencies": {
+    "wait-on": "^9.1.0"
+  },
+  "repository": "github:homeradar/homeradar"
+}
