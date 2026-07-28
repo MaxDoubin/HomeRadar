@@ -22,6 +22,8 @@ export function setStoredToken(token) {
   }
 }
 
+import { handleDemoApi, demoDashboardSocket } from "./demo.js";
+
 // Self-provision a token for this already-LAN-trusted dashboard, once, on module load.
 const selfProvision = inMemoryToken
   ? Promise.resolve(inMemoryToken)
@@ -34,6 +36,10 @@ const selfProvision = inMemoryToken
       .catch(() => null);
 
 export async function api(path, options = {}) {
+  if (import.meta.env.VITE_DEMO_MODE === "true") {
+    return handleDemoApi(path, options);
+  }
+
   const headers = { "Content-Type": "application/json", ...options.headers };
   if (inMemoryToken) headers["X-HomeRadar-Token"] = inMemoryToken;
   const response = await fetch(`${API_ROOT}${path}`, { headers, ...options });
@@ -51,6 +57,10 @@ export async function tokenReady() {
 }
 
 export function dashboardSocket(onSnapshot) {
+  if (import.meta.env.VITE_DEMO_MODE === "true") {
+    return demoDashboardSocket(onSnapshot);
+  }
+
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const root = import.meta.env.VITE_WS_ROOT || `${protocol}//${window.location.host}`;
   const token = getStoredToken();
