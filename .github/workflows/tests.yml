@@ -91,6 +91,28 @@ jobs:
         working-directory: mobile/android
         run: gradle :core:test :app:assembleDebug --stacktrace
 
+  ios:
+    name: iOS companion app
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: mobile/ios/HomeRadar
+        run: xcodegen generate
+      - name: Compile app and tests for simulator
+        working-directory: mobile/ios/HomeRadar
+        run: |
+          xcodebuild \
+            -project HomeRadar.xcodeproj \
+            -scheme HomeRadar \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing
+
   docker:
     name: Docker appliance
     runs-on: ubuntu-latest
