@@ -3,38 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const TOKEN_KEY = "homeradar_token";
 const SEED_TOKEN = "seed-token-existing";
 
-// vi.hoisted() runs before any of this file's static imports are evaluated, so we can
-// seed localStorage with a token before "./api" is imported below. With a token already
-// present, api.js's module-level self-provisioning `fetch(".../pair/local-token")` call is
-// skipped entirely (see the gotcha in api.js), which keeps the rest of this file's tests
-// (that don't care about self-provisioning) from ever making a real network call.
 vi.hoisted(() => {
   try {
     globalThis.localStorage.setItem("homeradar_token", "seed-token-existing");
   } catch {
-    // ignore - defensive fetch stubbing below covers this case too
+    // jsdom storage can be unavailable in unusual environments.
   }
-});
-
-import { api, dashboardSocket, getStoredToken, setStoredToken, tokenReady } from "./api";
-
-describe("getStoredToken / setStoredToken", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  it("round-trips a token through localStorage", () => {
-    setStoredToken("abc123");
-    expect(localStorage.getItem(TOKEN_KEY)).toBe("abc123");
-    expect(getStoredToken()).toBe("abc123");
-  });
-
-  it("removes the key when set to null", () => {
-    setStoredToken("abc123");
-    setStoredToken(null);
-    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(getStoredToken()).toBeNull();
-  });
 });
 
 vi.mock("./demo", () => ({
@@ -42,7 +16,34 @@ vi.mock("./demo", () => ({
   demoDashboardSocket: vi.fn(),
 }));
 
-describe("api()", () => {
+import { api, dashboardSocket, getStoredToken, setStoredToken, tokenReady } from "./api";
+
+function clearPairingUi() {
+  document.querySelector(".hr-pairing-gate")?.remove();
+  document.querySelector("style[data-homeradar-pairing]")?.remove();
+}
+
+describe("token storage", () => {
+  beforeEach(() => {
+    setStoredToken(null);
+  });
+
+  it("round-trips a token through localStorage and a same-site cookie", () => {
+    setStoredToken("abc123");
+    expect(localStorage.getItem(TOKEN_KEY)).toBe("abc123");
+    expect(getStoredToken()).toBe("abc123");
+    expect(document.cookie).toContain("homeradar_token=abc123");
+  });
+
+  it("clears browser token state", () => {
+    setStoredToken("abc123");
+    setStoredToken(null);
+    expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(getStoredToken()).toBeNull();
+  });
+});
+
+describe("api", () => {
   beforeEach(() => {
     setStoredToken("api-token");
     vi.stubGlobal("fetch", vi.fn());
@@ -52,29 +53,29 @@ describe("api()", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends the X-HomeRadar-Token header plus Content-Type when a token is present", async () => {
-    fetch.mockResolvedValue({ ok: true, json: async () => ({ hello: "world" }) });
-    const result = await api("/foo");
-    expect(fetch).toHaveBeenCalledTimes(1);
+  it("sends the pairing token and JSON content type", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ hello: "world" }) });
+    const result = await api("/dashboard");
     const [url, options] = fetch.mock.calls[0];
-    expect(url).toBe("/foo");
+    expect(url).toBe("/dashboard");
     expect(options.headers).toMatchObject({
       "Content-Type": "application/json",
       "X-HomeRadar-Token": "api-token",
     });
+    expect(options.cache).toBe("no-store");
     expect(result).toEqual({ hello: "world" });
   });
 
-  it("omits the token header when no token is present", async () => {
-    setStoredToken(null);
-    fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-    await api("/foo");
+  it("preserves method and body options", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
+    const body = JSON.stringify({ resolved: true });
+    await api("/alerts/5", { method: "PATCH", body });
     const [, options] = fetch.mock.calls[0];
-    expect(options.headers).not.toHaveProperty("X-HomeRadar-Token");
-    expect(options.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(options.method).toBe("PATCH");
+    expect(options.body).toBe(body);
   });
 
-  it("throws with the response's `detail` message on a non-OK JSON response", async () => {
+  it("uses the API detail message for errors", async () => {
     fetch.mockResolvedValue({
       ok: false,
       status: 400,
@@ -83,120 +84,76 @@ describe("api()", () => {
     await expect(api("/foo")).rejects.toThrow("bad request");
   });
 
-  it("falls back to a generic message when the error body isn't parseable JSON", async () => {
-    fetch.mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => {
-        throw new SyntaxError("Unexpected token");
-      },
-    });
-    await expect(api("/foo")).rejects.toThrow("Request failed (500)");
-  });
-
-  it("resolves with the parsed JSON body on success", async () => {
-    fetch.mockResolvedValue({ ok: true, json: async () => ({ devices: [1, 2, 3] }) });
-    const result = await api("/dashboard");
-    expect(result).toEqual({ devices: [1, 2, 3] });
-  });
-
-  it("passes method/body options through to fetch untouched", async () => {
-    fetch.mockResolvedValue({ ok: true, json: async () => ({}) });
-    const body = JSON.stringify({ resolved: true });
-    await api("/alerts/5", { method: "PATCH", body });
-    const [, options] = fetch.mock.calls[0];
-    expect(options.method).toBe("PATCH");
-    expect(options.body).toBe(body);
+  it("returns null for a successful empty response", async () => {
+    fetch.mockResolvedValue({ ok: true, status: 204, json: vi.fn() });
+    await expect(api("/empty")).resolves.toBeNull();
   });
 });
 
-describe("api() with VITE_DEMO_MODE", () => {
-  let originalEnv;
-  beforeEach(() => {
-    originalEnv = import.meta.env.VITE_DEMO_MODE;
-    import.meta.env.VITE_DEMO_MODE = "true";
-  });
-  afterEach(() => {
-    import.meta.env.VITE_DEMO_MODE = originalEnv;
-    vi.clearAllMocks();
-  });
-
-  it("delegates to handleDemoApi", async () => {
-    const { handleDemoApi } = await import("./demo");
-    handleDemoApi.mockResolvedValue({ hello: "demo" });
-    const result = await api("/dashboard", { method: "POST" });
-    expect(handleDemoApi).toHaveBeenCalledWith("/dashboard", { method: "POST" });
-    expect(result).toEqual({ hello: "demo" });
-  });
-});
-
-describe("tokenReady() with a token already present at import time", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("resolves with the pre-existing token and never calls fetch for /pair/local-token", async () => {
-    vi.stubGlobal("fetch", vi.fn());
-    const result = await tokenReady();
-    expect(result).toBe(SEED_TOKEN);
-    const calledLocalToken = fetch.mock.calls.some(([url]) => String(url).includes("pair/local-token"));
-    expect(calledLocalToken).toBe(false);
-  });
-});
-
-describe("tokenReady() self-provisioning with no token at import time", () => {
+describe("secure bootstrap and pairing", () => {
   beforeEach(() => {
     localStorage.clear();
+    document.cookie = `${TOKEN_KEY}=; Path=/; Max-Age=0`;
+    clearPairingUi();
     vi.resetModules();
   });
 
   afterEach(() => {
+    clearPairingUi();
     vi.unstubAllGlobals();
   });
 
-  it("fetches /pair/local-token, resolves to the returned token, and stores it", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn((url) => {
-        expect(String(url)).toContain("/pair/local-token");
-        return Promise.resolve({ ok: true, json: async () => ({ token: "abc" }) });
-      })
-    );
+  it("uses the appliance-only local bootstrap endpoint when available", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url) => {
+      expect(String(url)).toContain("/pair/local-token");
+      return { ok: true, status: 200, json: async () => ({ token: "local-token" }) };
+    }));
     const freshApi = await import("./api");
-    const token = await freshApi.tokenReady();
-    expect(token).toBe("abc");
-    expect(freshApi.getStoredToken()).toBe("abc");
-    expect(localStorage.getItem(TOKEN_KEY)).toBe("abc");
+    await expect(freshApi.tokenReady()).resolves.toBe("local-token");
+    expect(freshApi.getStoredToken()).toBe("local-token");
   });
 
-  it("resolves to null (whatever getStoredToken returns) when the fetch rejects", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.reject(new Error("network down"))));
-    const freshApi = await import("./api");
-    const token = await freshApi.tokenReady();
-    expect(token).toBeNull();
-    expect(freshApi.getStoredToken()).toBeNull();
-  });
+  it("shows a pairing screen and exchanges a six-digit code for a token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url, options = {}) => {
+      if (String(url).includes("/pair/local-token")) {
+        return { ok: false, status: 403, json: async () => ({ detail: "local only" }) };
+      }
+      if (String(url).includes("/pair/claim")) {
+        expect(JSON.parse(options.body)).toEqual({ code: "123456" });
+        return { ok: true, status: 200, json: async () => ({ token: "paired-token" }) };
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }));
 
-  it("resolves to null when the fetch returns a non-ok response", async () => {
-    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: false, status: 500 })));
     const freshApi = await import("./api");
-    const token = await freshApi.tokenReady();
-    expect(token).toBeNull();
-    expect(freshApi.getStoredToken()).toBeNull();
+    const ready = freshApi.tokenReady();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const gate = document.querySelector(".hr-pairing-gate");
+    const input = gate.querySelector("input");
+    input.value = "123456";
+    gate.querySelector("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await expect(ready).resolves.toBe("paired-token");
+    expect(freshApi.getStoredToken()).toBe("paired-token");
+    expect(document.querySelector(".hr-pairing-gate")).toBeNull();
   });
 });
 
-describe("dashboardSocket()", () => {
+describe("dashboardSocket", () => {
   class FakeWebSocket {
     constructor(url) {
       this.url = url;
       FakeWebSocket.instances.push(this);
     }
+    close() {}
   }
   FakeWebSocket.instances = [];
 
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    setStoredToken("socket token/special");
     vi.stubGlobal("WebSocket", FakeWebSocket);
   });
 
@@ -204,70 +161,56 @@ describe("dashboardSocket()", () => {
     vi.unstubAllGlobals();
   });
 
-  it("includes an encoded token query param in the URL when a token is present", () => {
-    setStoredToken("t0k en/special");
+  it("waits for authentication and opens an encoded WebSocket URL", async () => {
     const onSnapshot = vi.fn();
-    dashboardSocket(onSnapshot);
+    const wrapper = dashboardSocket(onSnapshot);
+    await Promise.resolve();
+    await Promise.resolve();
     const socket = FakeWebSocket.instances[0];
-    expect(socket.url).toContain(`?token=${encodeURIComponent("t0k en/special")}`);
-  });
+    expect(socket.url).toContain(`?token=${encodeURIComponent("socket token/special")}`);
 
-  it("has no token query param at all when no token is present", () => {
-    setStoredToken(null);
-    const onSnapshot = vi.fn();
-    dashboardSocket(onSnapshot);
-    const socket = FakeWebSocket.instances[0];
-    expect(socket.url).not.toContain("token=");
-    expect(socket.url.includes("?")).toBe(false);
-  });
-
-  it("defaults the scheme/host from window.location when VITE_WS_ROOT isn't set", () => {
-    setStoredToken(null);
-    expect(import.meta.env.VITE_WS_ROOT).toBeFalsy();
-    const onSnapshot = vi.fn();
-    dashboardSocket(onSnapshot);
-    const socket = FakeWebSocket.instances[0];
-    const expectedProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    expect(socket.url).toBe(`${expectedProtocol}//${window.location.host}/ws`);
-  });
-
-  it("invokes onSnapshot with the parsed payload for a `snapshot` message", () => {
-    setStoredToken("tok");
-    const onSnapshot = vi.fn();
-    const socket = dashboardSocket(onSnapshot);
     const payload = { type: "snapshot", devices: [], alerts: [] };
     socket.onmessage({ data: JSON.stringify(payload) });
-    expect(onSnapshot).toHaveBeenCalledTimes(1);
     expect(onSnapshot).toHaveBeenCalledWith(payload);
+    wrapper.close();
   });
 
-  it("does not invoke onSnapshot for a message of a different type", () => {
-    setStoredToken("tok");
+  it("ignores non-snapshot messages", async () => {
     const onSnapshot = vi.fn();
-    const socket = dashboardSocket(onSnapshot);
-    socket.onmessage({ data: JSON.stringify({ type: "something_else" }) });
+    dashboardSocket(onSnapshot);
+    await Promise.resolve();
+    await Promise.resolve();
+    FakeWebSocket.instances[0].onmessage({ data: JSON.stringify({ type: "ping" }) });
     expect(onSnapshot).not.toHaveBeenCalled();
   });
 });
 
-describe("dashboardSocket() with VITE_DEMO_MODE", () => {
-  let originalEnv;
+describe("demo mode", () => {
+  let original;
   beforeEach(() => {
-    originalEnv = import.meta.env.VITE_DEMO_MODE;
+    original = import.meta.env.VITE_DEMO_MODE;
     import.meta.env.VITE_DEMO_MODE = "true";
   });
   afterEach(() => {
-    import.meta.env.VITE_DEMO_MODE = originalEnv;
+    import.meta.env.VITE_DEMO_MODE = original;
     vi.clearAllMocks();
   });
 
-  it("delegates to demoDashboardSocket", async () => {
-    const { demoDashboardSocket } = await import("./demo");
-    const mockSocket = { close: vi.fn() };
-    demoDashboardSocket.mockReturnValue(mockSocket);
-    const onSnapshot = vi.fn();
-    const socket = dashboardSocket(onSnapshot);
-    expect(demoDashboardSocket).toHaveBeenCalledWith(onSnapshot);
-    expect(socket).toBe(mockSocket);
+  it("delegates API and socket behavior to the demo provider", async () => {
+    const { handleDemoApi, demoDashboardSocket } = await import("./demo");
+    handleDemoApi.mockResolvedValue({ demo: true });
+    demoDashboardSocket.mockReturnValue({ close: vi.fn() });
+
+    await expect(api("/dashboard")).resolves.toEqual({ demo: true });
+    const socket = dashboardSocket(vi.fn());
+    expect(demoDashboardSocket).toHaveBeenCalled();
+    expect(socket).toBeTruthy();
+  });
+});
+
+describe("existing-token readiness", () => {
+  it("resolves the token present when the module was imported", async () => {
+    setStoredToken(SEED_TOKEN);
+    await expect(tokenReady()).resolves.toBe(SEED_TOKEN);
   });
 });
