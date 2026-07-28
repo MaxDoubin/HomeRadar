@@ -52,7 +52,10 @@ async def dashboard_websocket(websocket: WebSocket):
     if token:
         with get_conn() as conn:
             token_valid = verify_token(conn, token)
-    if not local and not token_valid:
+
+    # A supplied bad credential is always rejected, even from loopback. A
+    # credential-free connection is allowed only for the appliance's own UI.
+    if (token and not token_valid) or (not local and not token_valid):
         await websocket.close(code=4401, reason="Pairing token required")
         return
 
