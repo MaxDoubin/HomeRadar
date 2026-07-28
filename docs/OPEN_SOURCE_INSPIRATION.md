@@ -37,3 +37,10 @@ operational design.
 Studying a feature does not import another project's implementation or license into Home
 Radar. These citations are included for transparency and respect for the open-source
 projects that established the product patterns.
+
+## Blocky
+
+- Project: [Blocky](https://github.com/0xERR0R/blocky)
+- License: [Apache-2.0](https://github.com/0xERR0R/blocky/blob/master/LICENSE)
+- Ideas studied: custom DNS resolution for specific domains.
+- Home Radar adaptation: implemented a custom DNS records feature that allows mapping specific domains to IP addresses.

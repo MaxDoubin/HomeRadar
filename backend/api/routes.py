@@ -42,6 +42,7 @@ class SettingsUpdate(BaseModel):
     digest_email: str | None = Field(default=None, max_length=320)
     dns_upstream: str | None = Field(default=None, max_length=255)
     notifications_enabled: bool | None = None
+    custom_dns_records: str | None = Field(default=None)
 
 
 class ConnectionObservation(BaseModel):
@@ -320,6 +321,7 @@ def get_settings():
         "notifications_enabled": saved.get("notifications_enabled", "true") == "true",
         "dns_enabled": config.DNS_ENABLED,
         "setup_complete": saved.get("setup_complete", "false") == "true",
+        "custom_dns_records": saved.get("custom_dns_records", "{}"),
     }
 
 

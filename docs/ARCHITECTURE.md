@@ -3,7 +3,7 @@
 ## Overview
 
 Home Radar runs as a set of Python services on a repurposed machine sitting on the
-family's LAN. It never sits inline between devices and the router — it observes and
+family's LAN. It never sits inline between devices and the router - it observes and
 proxies DNS, but the internet keeps working even if Home Radar is unplugged.
 
 ```
@@ -64,7 +64,7 @@ Phase 1 databases gain these fields without losing inventory or authorization st
 ## Why passive + DNS proxy, not inline
 
 Being inline (bridge/router mode) would give deeper visibility but means any Home Radar
-crash takes the family's internet down with it — unacceptable for a $0 appliance nobody
+crash takes the family's internet down with it - unacceptable for a $0 appliance nobody
 is paid to maintain. Passive ARP/mDNS discovery plus acting as the LAN's DNS server (via
 DHCP) gives most of the same visibility (every device, every DNS query) with a trivial
 failure mode: DNS proxy dies → clients fall back to the router's DNS after a timeout,

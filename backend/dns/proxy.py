@@ -9,7 +9,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from dnslib import DNSHeader, DNSRecord, QTYPE, RCODE
+import json
+from dnslib import DNSHeader, DNSRecord, QTYPE, RCODE, RR, A, AAAA
 
 from backend import config
 from backend.db import get_conn, models
@@ -222,6 +223,45 @@ class DNSProxy:
             upstreams = {key: dict(value) for key, value in self._upstream_stats.items()}
         return {"cache": self.cache.stats(), "upstreams": upstreams}
 
+    def _check_custom_dns(self, payload: bytes, custom_records: str | None) -> bytes | None:
+        if not custom_records:
+            return None
+        try:
+            records = json.loads(custom_records)
+        except Exception:
+            return None
+
+        request = DNSRecord.parse(payload)
+        if not request.questions:
+            return None
+
+        question = request.questions[0]
+        domain = str(question.qname).rstrip(".").lower()
+
+        ip_str = records.get(domain)
+        if not ip_str:
+            return None
+
+        try:
+            ip = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return None
+
+        qtype = question.qtype
+        reply = request.reply()
+        added = False
+
+        if ip.version == 4 and qtype in (QTYPE.A, QTYPE.ANY):
+            reply.add_answer(RR(rname=question.qname, rtype=QTYPE.A, rclass=1, ttl=300, rdata=A(ip_str)))
+            added = True
+        elif ip.version == 6 and qtype in (QTYPE.AAAA, QTYPE.ANY):
+            reply.add_answer(RR(rname=question.qname, rtype=QTYPE.AAAA, rclass=1, ttl=300, rdata=AAAA(ip_str)))
+            added = True
+
+        if added:
+            return reply.pack()
+        return None
+
     def _process(self, payload: bytes, client_ip: str) -> bytes | None:
         response: bytes | None = None
         try:
@@ -229,6 +269,7 @@ class DNSProxy:
             with get_conn() as conn:
                 device = models.find_device_by_ip(conn, client_ip)
                 policy = models.get_device_policy(conn, device["id"]) if device else None
+                custom_dns_records = models.get_setting(conn, "custom_dns_records")
             policy_decision = evaluate_policy(policy, decision.domain)
             household_blocked = bool(device and device["is_authorized"] == 2)
             policy_blocked = household_blocked or policy_decision.blocked
@@ -237,7 +278,11 @@ class DNSProxy:
             elif decision.blocked:
                 response = blocked_response(payload)
             else:
-                response = self._resolve(payload)
+                custom_response = self._check_custom_dns(payload, custom_dns_records)
+                if custom_response:
+                    response = custom_response
+                else:
+                    response = self._resolve(payload)
             with get_conn() as conn:
                 models.log_traffic(
                     conn,

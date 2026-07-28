@@ -1,7 +1,10 @@
 # Install Home Radar
 
-Home Radar is designed for a dedicated Linux laptop connected by Ethernet. Do not change
+Home Radar is designed for a dedicated Linux laptop connected by Ethernet (or Wi-Fi, provided your network does not enforce AP/client isolation). Do not change
 your router's DNS settings until the dashboard and proxy are healthy.
+
+If you are setting this up on an old laptop, you might want to start with our beginner-friendly guide:
+[Repurposing an Old Laptop with Home Radar](OLD_LAPTOP_GUIDE.md).
 
 ## Docker Compose
 

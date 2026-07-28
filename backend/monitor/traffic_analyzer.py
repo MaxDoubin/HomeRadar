@@ -60,12 +60,21 @@ class PassiveTrafficMonitor:
     def __init__(self, interface: str | None = config.TRAFFIC_INTERFACE):
         self.interface = interface
         self._flows: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0])
+        self._deauths: dict[str, int] = defaultdict(int)
         self._lock = threading.Lock()
         self._stop = threading.Event()
 
     def _packet(self, packet) -> None:
         try:
+            from scapy.layers.dot11 import Dot11Deauth
             from scapy.layers.inet import IP
+
+            if packet.haslayer(Dot11Deauth):
+                mac = packet.addr2
+                if mac:
+                    with self._lock:
+                        self._deauths[mac] += 1
+                return
 
             if IP not in packet:
                 return
@@ -76,15 +85,34 @@ class PassiveTrafficMonitor:
                 return
             with self._lock:
                 self._flows[(source, destination)][0] += len(packet)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ImportError):
             return
 
     def _flush(self) -> None:
         with self._lock:
             flows, self._flows = self._flows, defaultdict(lambda: [0, 0])
-        if not flows:
+            deauths, self._deauths = self._deauths, defaultdict(int)
+
+        if not flows and not deauths:
             return
+
         with get_conn() as conn:
+            for mac, count in deauths.items():
+                if count >= 10:
+                    device = conn.execute("SELECT id FROM devices WHERE mac = ?", (mac,)).fetchone()
+                    device_id = device["id"] if device else None
+                    models.create_alert_once(
+                        conn,
+                        device_id=device_id,
+                        severity="critical",
+                        title="Wi-Fi Deauthentication Attack Detected",
+                        description=f"Detected {count} deauth frames from MAC {mac}. This may be a Flipper Zero or similar tool attempting to disconnect devices.",
+                        window_minutes=60,
+                    )
+
+            if not flows:
+                return
+
             for (source, destination), (sent, received) in flows.items():
                 record_connection(
                     conn,

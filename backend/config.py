@@ -1,8 +1,13 @@
 """Central configuration for the Home Radar backend, sourced from environment variables."""
 import os
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+if getattr(sys, 'frozen', False):
+    # Pyinstaller case
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = os.environ.get("HOMERADAR_DB_PATH", str(BASE_DIR / "data" / "homeradar.db"))
 DATA_DIR = Path(os.environ.get("HOMERADAR_DATA_DIR", str(BASE_DIR / "data")))
 
