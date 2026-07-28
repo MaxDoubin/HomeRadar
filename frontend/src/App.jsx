@@ -294,7 +294,7 @@ function Settings() {
       <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while the dashboard is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({...form, notifications_enabled:e.target.checked})}/></label>
       <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
     </form><aside className="card system-card"><p className="eyebrow">SYSTEM HEALTH</p><h2 className={health?.status === "healthy" ? "good":"warn"}>{health?.status || "Checking…"}</h2>
-      <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "—"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"—"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
+      <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "-"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"-"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
       {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
       <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
       {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}

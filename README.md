@@ -23,7 +23,9 @@ See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the full roadmap.
 
 ## Quick start
 
-Docker on a Linux appliance gives discovery and DNS access to the real LAN:
+You can download the standalone desktop application for Windows, macOS, or Linux directly from the [GitHub Releases](https://github.com/homeradar/homeradar/releases) page. It bundles the backend and dashboard into one easy-to-run app.
+
+Alternatively, Docker on a Linux appliance gives discovery and DNS access to the real LAN:
 
 ```bash
 cp .env.example .env
