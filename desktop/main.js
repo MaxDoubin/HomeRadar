@@ -1,117 +1,157 @@
-const net = require('net');
+const { app, BrowserWindow, dialog, shell } = require("electron");
+const { spawn } = require("child_process");
+const fs = require("fs");
+const net = require("net");
+const path = require("path");
+const waitOn = require("wait-on");
+
+let backendProcess = null;
+let mainWindow = null;
+let backendPort = null;
+let quitting = false;
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
-      server.close(() => {
-        resolve(port);
-      });
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      server.close(() => resolve(port));
     });
   });
 }
-const { app, BrowserWindow } = require('electron');
-const path = require('path');
-const { spawn } = require('child_process');
-const waitOn = require('wait-on');
-const fs = require('fs');
-
-let backendProcess = null;
-let mainWindow = null;
 
 function getBackendExecutablePath() {
-  const isWindows = process.platform === 'win32';
-  const execName = isWindows ? 'homeradar-backend.exe' : 'homeradar-backend';
+  const executable = process.platform === "win32" ? "homeradar-backend.exe" : "homeradar-backend";
+  return app.isPackaged
+    ? path.join(process.resourcesPath, executable)
+    : path.join(__dirname, "resources", executable);
+}
 
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, execName);
-  } else {
-    return path.join(__dirname, 'resources', execName);
+function stopBackend() {
+  if (!backendProcess || backendProcess.killed) return;
+  try {
+    backendProcess.kill(process.platform === "win32" ? undefined : "SIGTERM");
+  } catch (error) {
+    console.error("Could not stop backend", error);
   }
+  backendProcess = null;
 }
 
 async function startBackend() {
   const backendPath = getBackendExecutablePath();
-  console.log(`Starting backend at ${backendPath}`);
-
   if (!fs.existsSync(backendPath)) {
-    console.error(`Backend executable not found at ${backendPath}`);
+    throw new Error(`The bundled Home Radar backend is missing: ${backendPath}`);
   }
 
-  global.backendPort = await getFreePort();
-
-  const env = Object.assign({}, process.env, {
-    HOMERADAR_API_PORT: global.backendPort.toString(),
-    HOMERADAR_DATA_DIR: app.getPath('userData'),
-    HOMERADAR_DB_PATH: path.join(app.getPath('userData'), 'homeradar.db')
-  });
+  backendPort = await getFreePort();
+  const dataDirectory = app.getPath("userData");
+  const environment = {
+    ...process.env,
+    HOMERADAR_API_HOST: "127.0.0.1",
+    HOMERADAR_API_PORT: String(backendPort),
+    HOMERADAR_DATA_DIR: dataDirectory,
+    HOMERADAR_DB_PATH: path.join(dataDirectory, "homeradar.db"),
+    HOMERADAR_BACKUP_DIR: path.join(dataDirectory, "backups"),
+    HOMERADAR_DNS_ENABLED: "false",
+    HOMERADAR_TRAFFIC_MONITOR_ENABLED: "false",
+    HOMERADAR_BLOCKLIST_AUTO_UPDATE: "true",
+    PYTHONUNBUFFERED: "1",
+  };
 
   backendProcess = spawn(backendPath, [], {
-    env: env,
-    stdio: 'inherit'
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
   });
 
-  backendProcess.on('error', (err) => {
-    console.error('Failed to start backend process.', err);
+  backendProcess.stdout?.on("data", (data) => console.log(`[backend] ${data}`));
+  backendProcess.stderr?.on("data", (data) => console.error(`[backend] ${data}`));
+  backendProcess.on("error", (error) => console.error("Backend process failed", error));
+  backendProcess.on("exit", (code, signal) => {
+    console.log(`Backend exited with code ${code} and signal ${signal}`);
+    backendProcess = null;
+    if (!quitting && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.loadFile(path.join(__dirname, "error.html"));
+    }
   });
 
-  backendProcess.on('exit', (code, signal) => {
-    console.log(`Backend process exited with code ${code} and signal ${signal}`);
+  await waitOn({
+    resources: [`http-get://127.0.0.1:${backendPort}/health`],
+    timeout: 45000,
+    interval: 250,
+    validateStatus: (status) => status >= 200 && status < 500,
   });
 }
 
 async function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    title: 'Home Radar',
+    width: 1360,
+    height: 860,
+    minWidth: 940,
+    minHeight: 650,
+    title: "Home Radar",
+    backgroundColor: "#020806",
+    show: false,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+
+  mainWindow.removeMenu();
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://github.com/MaxDoubin/HomeRadar")) shell.openExternal(url);
+    return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const allowed = `http://127.0.0.1:${backendPort}`;
+    if (!url.startsWith(allowed)) event.preventDefault();
+  });
+  mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  try {
+    await startBackend();
+    await mainWindow.loadURL(`http://127.0.0.1:${backendPort}`);
+  } catch (error) {
+    console.error("Home Radar startup failed", error);
+    await mainWindow.loadFile(path.join(__dirname, "error.html"));
+    mainWindow.show();
+    dialog.showErrorBox("Home Radar could not start", error.message);
+  }
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
     }
   });
 
-  const url = `http://127.0.0.1:${global.backendPort}`;
-  const waitOnOptions = {
-    resources: [url],
-    timeout: 30000,
-  };
+  app.whenReady().then(createWindow);
 
-  try {
-    await waitOn(waitOnOptions);
-    console.log('Backend is up, loading window');
-    mainWindow.loadURL(url);
-  } catch (err) {
-    console.error('Timeout waiting for backend to start', err);
-    mainWindow.loadFile('error.html');
-  }
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 }
 
-app.whenReady().then(async () => {
-  await startBackend();
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
-  });
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") app.quit();
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
+app.on("before-quit", () => {
+  quitting = true;
+  stopBackend();
 });
 
-app.on('will-quit', () => {
-  if (backendProcess) {
-    backendProcess.kill();
-  }
-});
+process.on("exit", stopBackend);
