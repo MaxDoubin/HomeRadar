@@ -10,20 +10,19 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend import config
+from backend import config, pairing, services
 from backend.api.routes import router as api_router
 from backend.api.websocket import router as websocket_router
-from backend.db import get_conn, init_db
+from backend.db import get_conn, init_db, models
 from backend.discovery.scan_runner import run_discovery_scan
 from backend.dns.blocklists import record_update_results
 from backend.dns.proxy import DNSProxy
-from backend.monitor.trust_scoring import recalculate_all
-from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
-from backend.monitor.exposure_audit import audit_all
 from backend.maintenance import backup_if_due, cleanup_database
+from backend.monitor.exposure_audit import audit_all
+from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
+from backend.monitor.trust_scoring import recalculate_all
 from backend.security import ApplianceSecurityMiddleware
 from backend.services import blocklists
-from backend import services
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("homeradar.main")
@@ -77,9 +76,31 @@ async def _maintenance_loop():
         await asyncio.sleep(max(300, config.MAINTENANCE_INTERVAL_SECONDS))
 
 
+def _prepare_first_run_pairing() -> None:
+    """Create a temporary code for headless first-run installations.
+
+    A desktop or kiosk browser can bootstrap through loopback. Docker and
+    headless Debian users instead read this code from the local service logs and
+    enter it into the remote browser pairing screen. The code is replaced on
+    each pre-setup restart and expires after thirty minutes.
+    """
+    with get_conn() as conn:
+        setup_complete = models.get_setting(conn, "setup_complete", "false") == "true"
+        if setup_complete:
+            return
+        result = pairing.issue_pairing_code(conn, ttl_seconds=1800)
+    logger.warning("=" * 72)
+    logger.warning("HOME RADAR FIRST-RUN PAIRING CODE: %s", result["code"])
+    logger.warning("Enter this code in the dashboard within 30 minutes.")
+    logger.warning("Docker: docker logs homeradar | grep 'PAIRING CODE'")
+    logger.warning("systemd: journalctl -u homeradar | grep 'PAIRING CODE'")
+    logger.warning("=" * 72)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    _prepare_first_run_pairing()
     tasks = [
         asyncio.create_task(_discovery_loop()),
         asyncio.create_task(_trust_loop()),
