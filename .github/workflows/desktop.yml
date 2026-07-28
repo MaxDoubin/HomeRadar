@@ -1,6 +1,7 @@
 name: Build Downloads
 
 on:
+  pull_request:
   push:
     branches: [main]
     tags: ["v*"]
@@ -166,6 +167,7 @@ jobs:
 
   container:
     name: Publish Docker image
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -207,6 +209,7 @@ jobs:
 
   release:
     name: Publish direct downloads
+    if: github.event_name != 'pull_request'
     needs: [desktop, android]
     runs-on: ubuntu-latest
     steps:
