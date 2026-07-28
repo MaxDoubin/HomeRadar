@@ -1,8 +1,23 @@
 """Regression coverage for defects found during the second full-code audit."""
 from __future__ import annotations
 
+import pytest
+
+from backend.db import models
 from backend.dns.blocklists import BlocklistManager
 from backend.dns.proxy import DNSProxy
+
+
+@pytest.fixture
+def device_id(db_path):
+    with models.get_conn(db_path) as conn:
+        return models.upsert_device(
+            conn,
+            mac="AA:BB:CC:DD:EE:99",
+            ip="192.168.1.99",
+            hostname="second-audit-device",
+            vendor="Test Vendor",
+        )
 
 
 def test_main_application_does_not_publish_openapi_schema():
