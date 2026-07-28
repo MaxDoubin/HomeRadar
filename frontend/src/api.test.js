@@ -168,12 +168,13 @@ describe("dashboardSocket", () => {
     vi.unstubAllGlobals();
   });
 
-  it("waits for authentication and opens an encoded WebSocket URL", async () => {
+  it("uses the same-origin cookie and keeps the token out of the WebSocket URL", async () => {
     const onSnapshot = vi.fn();
     const wrapper = dashboardSocket(onSnapshot);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const socket = FakeWebSocket.instances[0];
-    expect(socket.url).toContain(`?token=${encodeURIComponent("socket token/special")}`);
+    expect(socket.url).toMatch(/\/ws$/);
+    expect(socket.url).not.toContain("token=");
 
     const payload = { type: "snapshot", devices: [], alerts: [] };
     socket.onmessage({ data: JSON.stringify(payload) });
