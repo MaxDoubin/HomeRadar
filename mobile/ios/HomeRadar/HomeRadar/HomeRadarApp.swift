@@ -61,13 +61,15 @@ final class AppSession: ObservableObject {
         self.isConnected = connectionStore.hasCredentials
 
         socket.onSnapshot = { [weak self] snapshot in
-            Task { @MainActor [weak self] in
-                self?.apply(snapshot: snapshot)
+            guard let self else { return }
+            Task { @MainActor in
+                self.apply(snapshot: snapshot)
             }
         }
         socket.onStateChange = { [weak self] state in
-            Task { @MainActor [weak self] in
-                self?.socketState = state
+            guard let self else { return }
+            Task { @MainActor in
+                self.socketState = state
             }
         }
     }

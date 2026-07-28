@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "homeradar-android"
 
-include(":core")
+include(":core", ":app")

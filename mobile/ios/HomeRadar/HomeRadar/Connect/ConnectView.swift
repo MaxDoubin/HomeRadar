@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Full-screen connect flow shown instead of the tab bar whenever no saved
