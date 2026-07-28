@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -55,6 +56,22 @@ def terminate(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
+def cleanup_data_dir(path: Path, attempts: int = 10, delay: float = 0.5) -> None:
+    """Remove the temp data dir, retrying on Windows where a just-terminated
+    process's SQLite file handle can stay locked for a moment after wait()
+    returns, making an immediate rmtree race a PermissionError (WinError 32)."""
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except (PermissionError, OSError):
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("executable", type=Path)
@@ -66,7 +83,8 @@ def main() -> int:
         raise FileNotFoundError(f"Packaged backend not found: {executable}")
 
     port = free_port()
-    with tempfile.TemporaryDirectory(prefix="homeradar-smoke-") as temp_dir:
+    temp_dir = tempfile.mkdtemp(prefix="homeradar-smoke-")
+    try:
         data_dir = Path(temp_dir)
         environment = {
             **os.environ,
@@ -92,6 +110,8 @@ def main() -> int:
             print(f"Packaged backend is healthy on 127.0.0.1:{port}")
         finally:
             terminate(process)
+    finally:
+        cleanup_data_dir(Path(temp_dir))
 
     return 0
 
