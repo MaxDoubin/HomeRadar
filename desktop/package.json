@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "Home Radar local network security dashboard",
   "main": "main.js",
+  "desktopName": "HomeRadar",
   "scripts": {
     "test": "node --check main.js",
     "build": "electron-builder --publish never",
     "release": "electron-builder --publish always"
   },
-  "author": "Max Doubin",
+  "author": {
+    "name": "Max Doubin",
+    "email": "95324785+MaxDoubin@users.noreply.github.com"
+  },
   "license": "MIT",
   "homepage": "https://github.com/MaxDoubin/HomeRadar",
   "repository": {
@@ -23,6 +27,7 @@
   "build": {
     "appId": "com.maxdoubin.homeradar",
     "productName": "Home Radar",
+    "executableName": "HomeRadar",
     "asar": true,
     "directories": {
       "output": "dist"
@@ -58,7 +63,9 @@
         "deb"
       ],
       "category": "Utility",
-      "synopsis": "Local home network security dashboard"
+      "synopsis": "Local home network security dashboard",
+      "maintainer": "Max Doubin <95324785+MaxDoubin@users.noreply.github.com>",
+      "syncDesktopName": true
     },
     "extraResources": [
       {
