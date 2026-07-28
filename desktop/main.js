@@ -1,9 +1,9 @@
 const { app, BrowserWindow, dialog, shell } = require("electron");
 const { spawn } = require("child_process");
 const fs = require("fs");
+const http = require("http");
 const net = require("net");
 const path = require("path");
-const waitOn = require("wait-on");
 
 let backendProcess = null;
 let mainWindow = null;
@@ -20,6 +20,34 @@ function getFreePort() {
       server.close(() => resolve(port));
     });
   });
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitForBackend(port, timeoutMilliseconds = 45000) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    const available = await new Promise((resolve) => {
+      const request = http.get(
+        { hostname: "127.0.0.1", port, path: "/health", timeout: 1500 },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode >= 200 && response.statusCode < 500);
+        },
+      );
+      request.on("timeout", () => {
+        request.destroy();
+        resolve(false);
+      });
+      request.on("error", () => resolve(false));
+    });
+    if (available) return;
+    if (backendProcess === null) throw new Error("The Home Radar backend exited during startup.");
+    await delay(250);
+  }
+  throw new Error("The Home Radar backend did not become ready within 45 seconds.");
 }
 
 function getBackendExecutablePath() {
@@ -77,12 +105,7 @@ async function startBackend() {
     }
   });
 
-  await waitOn({
-    resources: [`http-get://127.0.0.1:${backendPort}/health`],
-    timeout: 45000,
-    interval: 250,
-    validateStatus: (status) => status >= 200 && status < 500,
-  });
+  await waitForBackend(backendPort);
 }
 
 async function createWindow() {
