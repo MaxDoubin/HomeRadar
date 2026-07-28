@@ -1,8 +1,8 @@
 name: Apply audit codemod
 
 on:
-  push:
-    branches: [agent/full-code-audit]
+  pull_request:
+    branches: [main]
     paths:
       - scripts/apply_audit_codemod.py
       - .github/workflows/audit-codemod.yml
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.head_ref == 'agent/full-code-audit'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
