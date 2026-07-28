@@ -30,7 +30,17 @@ cp .env.example .env
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Open `http://<appliance-ip>:8000` on the appliance itself. The first local browser securely receives the management token. A remote browser or mobile application must enter a one-time code generated from **Settings → Device pairing** on an already paired session.
+Open `http://127.0.0.1:8000` in a browser running directly on the appliance, or open `http://<appliance-ip>:8000` from another device and enter the first-run code printed in the service logs.
+
+```bash
+# Docker or Docker Compose
+docker logs homeradar 2>&1 | grep "PAIRING CODE"
+
+# Native systemd installation
+sudo journalctl -u homeradar --no-pager | grep "PAIRING CODE"
+```
+
+The headless first-run code is regenerated on each restart until setup is completed and expires after 30 minutes. After setup, new browsers and mobile applications use a ten-minute code generated from **Settings → Device pairing** on an already paired session.
 
 The container:
 
@@ -81,12 +91,13 @@ sudo systemctl status homeradar
 
 ## Secure first-run flow
 
-1. Open the dashboard directly on the appliance.
-2. Complete household name, DNS resolver, optional digest address, and notification settings.
-3. Run discovery and review detected devices.
-4. From Settings, generate a six-digit code for each remote browser or mobile device.
-5. Enter the code on that device. The code expires after ten minutes and is single-use.
-6. Rotate the access token from Settings if a paired device is lost or compromised.
+1. Open the dashboard directly on the appliance, or retrieve the temporary code from local service logs.
+2. Pair the first browser when required.
+3. Complete household name, DNS resolver, optional digest address, and notification settings.
+4. Run discovery and review detected devices.
+5. From Settings, generate a six-digit code for each additional browser or mobile device.
+6. Enter the code on that device. Normal pairing codes expire after ten minutes and are single-use.
+7. Rotate the access token from Settings if a paired device is lost or compromised.
 
 Do not expose port 8000 directly to the public internet. Home Radar is intended for a trusted home LAN or a properly secured private VPN.
 
