@@ -4,6 +4,7 @@ from backend.db import models
 from backend.dns.blocklists import (
     BlocklistManager,
     UpdateResult,
+    _https_context,
     normalize_domain,
     parse_blocklist,
     record_update_results,
@@ -46,6 +47,12 @@ def test_normalize_rejects_ips_urls_and_local_names():
     assert normalize_domain("Example.COM.") == "example.com"
 
 
+def test_https_context_requires_certificate_verification():
+    context = _https_context()
+    assert context.check_hostname is True
+    assert context.verify_mode.name == "CERT_REQUIRED"
+
+
 class _FakeURLResponse:
     """A context-manager stand-in for `http.client.HTTPResponse`."""
 
@@ -84,7 +91,8 @@ def test_update_merges_domains_from_multiple_sources(monkeypatch, tmp_path: Path
         "http://b.example/hosts.txt": "0.0.0.0 b-ads.example\n",
     }
 
-    def fake_urlopen(request, timeout=None):
+    def fake_urlopen(request, timeout=None, context=None):
+        assert context is not None
         return _FakeURLResponse(responses[request.full_url])
 
     monkeypatch.setattr("backend.dns.blocklists.urllib.request.urlopen", fake_urlopen)
@@ -101,7 +109,7 @@ def test_update_reports_error_for_one_failing_source_but_applies_the_other(monke
     manager = BlocklistManager(tmp_path / "blocklist.txt")
     urls = ["http://good.example/hosts.txt", "http://bad.example/hosts.txt"]
 
-    def fake_urlopen(request, timeout=None):
+    def fake_urlopen(request, timeout=None, context=None):
         if "bad" in request.full_url:
             raise OSError("connection refused")
         return _FakeURLResponse("0.0.0.0 good-ads.example\n")
