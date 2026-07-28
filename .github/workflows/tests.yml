@@ -155,20 +155,20 @@ jobs:
           docker run -d \
             --name homeradar-test \
             --cap-drop ALL \
-            --cap-add NET_RAW \
             --cap-add NET_BIND_SERVICE \
             --security-opt no-new-privileges:true \
             --read-only \
             --tmpfs /tmp:size=64m,mode=1777 \
             -p 18000:8000 \
             -e HOMERADAR_DNS_ENABLED=true \
+            -e HOMERADAR_DNS_HOST=0.0.0.0 \
             -e HOMERADAR_DNS_PORT=53 \
             -e HOMERADAR_BLOCKLIST_AUTO_UPDATE=false \
             -v homeradar-test-data:/data \
             homeradar:test
       - name: Wait for healthy API
         run: |
-          for attempt in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:18000/health >/dev/null; then
               docker inspect --format='user={{.Config.User}} status={{.State.Status}}' homeradar-test
               exit 0

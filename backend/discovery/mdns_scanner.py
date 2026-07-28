@@ -13,6 +13,8 @@ import time
 from collections import defaultdict
 from typing import Any
 
+from zeroconf import ServiceListener
+
 from backend import config
 
 logger = logging.getLogger("homeradar.mdns")
@@ -63,7 +65,7 @@ def _model_from_properties(properties: dict[str, str]) -> str | None:
     return None
 
 
-class _Listener:
+class _Listener(ServiceListener):
     def __init__(self, zeroconf, results: dict[str, dict], lock: threading.Lock):
         self.zeroconf = zeroconf
         self.results = results

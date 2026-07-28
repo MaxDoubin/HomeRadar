@@ -252,7 +252,7 @@ jobs:
         run: |
           tar -czf release/HomeRadar-iOS-Xcode-Source.tar.gz mobile/ios
           cd release
-          sha256sum * > SHA256SUMS.txt
+          sha256sum -- ./* > SHA256SUMS.txt
           ls -lh
 
       - name: Write release notes

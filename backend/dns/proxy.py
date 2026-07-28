@@ -221,9 +221,12 @@ class DNSProxy:
             return cached
         with self._inflight_lock:
             event = self._inflight.get(key)
-            owner = event is None
-            if owner:
-                event = self._inflight[key] = threading.Event()
+            if event is None:
+                event = threading.Event()
+                self._inflight[key] = event
+                owner = True
+            else:
+                owner = False
         if not owner:
             event.wait(config.DNS_TIMEOUT_SECONDS * max(1, len(self._upstreams())))
             cached = self.cache.get(key, request.header.id)

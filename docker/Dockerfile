@@ -8,8 +8,11 @@ RUN npm run build
 FROM python:3.11-slim
 WORKDIR /app
 
+# Debian security updates intentionally remain unpinned so image rebuilds receive
+# patched package revisions from the selected stable base image.
+# hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl iproute2 libcap2-bin net-tools \
+    && apt-get install -y --no-install-recommends curl iproute2 net-tools \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system homeradar \
     && useradd --system --gid homeradar --home-dir /app --shell /usr/sbin/nologin homeradar \
@@ -17,8 +20,7 @@ RUN apt-get update \
     && chown -R homeradar:homeradar /data /app
 
 COPY backend/requirements.txt backend/requirements.txt
-RUN pip install --no-cache-dir -r backend/requirements.txt \
-    && setcap 'cap_net_bind_service,cap_net_raw=+ep' "$(readlink -f "$(command -v python3)")"
+RUN pip install --no-cache-dir -r backend/requirements.txt
 
 COPY --chown=homeradar:homeradar backend backend
 COPY --chown=homeradar:homeradar kiosk kiosk
@@ -27,6 +29,7 @@ COPY --chown=homeradar:homeradar --from=dashboard /src/frontend/dist frontend/di
 ENV HOMERADAR_DB_PATH=/data/homeradar.db \
     HOMERADAR_DATA_DIR=/data \
     HOMERADAR_DNS_ENABLED=true \
+    HOMERADAR_DNS_HOST=0.0.0.0 \
     HOMERADAR_DNS_PORT=53 \
     HOMERADAR_BLOCKLIST_AUTO_UPDATE=true \
     PYTHONUNBUFFERED=1 \

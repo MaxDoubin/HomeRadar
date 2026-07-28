@@ -1,10 +1,10 @@
-fastapi==0.116.1
+fastapi==0.139.2
 uvicorn[standard]==0.35.0
-scapy==2.6.1
-zeroconf==0.147.0
+scapy==2.7.0
+zeroconf==0.149.16
 mac-vendor-lookup==0.1.12
 pydantic==2.11.7
-python-dotenv==1.1.1
+python-dotenv==1.2.2
 dnslib==0.9.26
 scikit-learn==1.7.1
 numpy==2.3.2

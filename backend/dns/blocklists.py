@@ -7,6 +7,7 @@ import os
 import ssl
 import tempfile
 import threading
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -19,6 +20,11 @@ from backend import config
 logger = logging.getLogger("homeradar.blocklists")
 
 _IGNORED_HOSTS = {"localhost", "localhost.localdomain", "local", "broadcasthost"}
+_HOSTS_FILE_ADDRESSES = {
+    str(ipaddress.IPv4Address(0)),
+    str(ipaddress.IPv4Address(0x7F000001)),
+    str(ipaddress.IPv6Address(0)),
+}
 
 
 def normalize_domain(value: str) -> str | None:
@@ -50,7 +56,7 @@ def parse_blocklist(text: str) -> set[str]:
         if not line:
             continue
         fields = line.split()
-        candidates = fields[1:] if fields and fields[0] in {"0.0.0.0", "127.0.0.1", "::"} else fields
+        candidates = fields[1:] if fields and fields[0] in _HOSTS_FILE_ADDRESSES else fields
         for candidate in candidates:
             if candidate.startswith("||"):
                 candidate = candidate[2:].split("^", 1)[0]
@@ -71,13 +77,17 @@ class UpdateResult:
 
 
 def _https_context() -> ssl.SSLContext:
-    """Return a TLS context backed by certifi's CA bundle.
-
-    Frozen Python applications cannot always locate the operating system trust
-    store. Using certifi makes HTTPS verification deterministic without ever
-    disabling certificate validation.
-    """
+    """Return a TLS context backed by certifi's verified CA bundle."""
     return ssl.create_default_context(cafile=certifi.where())
+
+
+def _validated_https_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("blocklist sources must use an absolute HTTPS URL")
+    if parsed.username or parsed.password:
+        raise ValueError("blocklist source URLs must not contain credentials")
+    return urllib.parse.urlunsplit(parsed)
 
 
 class BlocklistManager:
@@ -131,19 +141,22 @@ class BlocklistManager:
         merged: set[str] = set()
         results: list[UpdateResult] = []
         context = _https_context()
-        for url in urls or config.BLOCKLIST_URLS:
+        for source in urls or config.BLOCKLIST_URLS:
             try:
+                url = _validated_https_url(source)
                 request = urllib.request.Request(
                     url, headers={"User-Agent": "HomeRadar/0.3 blocklist updater"}
                 )
-                with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                with urllib.request.urlopen(  # nosec B310
+                    request, timeout=timeout, context=context
+                ) as response:
                     text = response.read(50_000_000).decode("utf-8", "replace")
                 domains = parse_blocklist(text)
                 merged.update(domains)
-                results.append(UpdateResult(url, len(domains), "ok"))
+                results.append(UpdateResult(source, len(domains), "ok"))
             except Exception as exc:
-                logger.warning("Blocklist update failed for %s: %s", url, exc)
-                results.append(UpdateResult(url, 0, "error", str(exc)[:500]))
+                logger.warning("Blocklist update failed for %s: %s", source, exc)
+                results.append(UpdateResult(source, 0, "error", str(exc)[:500]))
         if merged:
             self.replace(merged)
         return results

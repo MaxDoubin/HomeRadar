@@ -43,18 +43,19 @@ def merge_discovery_results(
 ) -> list[dict]:
     """Combine discovery sources into fingerprintable hosts.
 
-    MAC address remains the stable identity. mDNS/SSDP-only observations are retained
-    when the same IP exists in ARP or the operating system's neighbor cache.
+    MAC address remains the stable identity. mDNS/SSDP-only observations are
+    retained when the same IP exists in an ARP or operating-system neighbor result.
     """
     by_mac: dict[str, dict] = {}
     mac_by_ip: dict[str, str] = {}
 
-    for source_name, hosts in (("arp", arp_hosts), ("neighbor_cache", neighbor_hosts)):
+    for default_source, hosts in (("arp", arp_hosts), ("neighbor_cache", neighbor_hosts)):
         for host in hosts:
-            mac = host.get("mac", "").upper()
+            mac = str(host.get("mac", "")).upper()
             ip = host.get("ip")
             if not mac or not ip:
                 continue
+            source_name = str(host.get("source") or default_source)
             entry = by_mac.setdefault(
                 mac,
                 {"ip": ip, "mac": mac, "observation": {"sources": []}},
@@ -67,11 +68,11 @@ def merge_discovery_results(
 
     for source_name, observations in (("mdns", mdns_results), ("ssdp", ssdp_results)):
         for ip, observation in observations.items():
-            mac = mac_by_ip.get(ip)
-            if mac is None:
+            found_mac = mac_by_ip.get(ip)
+            if found_mac is None:
                 logger.debug("Skipping %s-only host %s because no MAC address is known", source_name, ip)
                 continue
-            target = by_mac[mac]["observation"]
+            target = by_mac[found_mac]["observation"]
             target["sources"] = sorted(set(target["sources"]) | {source_name})
             _merge_observation(target, observation)
 

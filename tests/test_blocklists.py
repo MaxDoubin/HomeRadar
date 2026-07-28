@@ -87,8 +87,8 @@ def test_replace_writes_atomically_and_leaves_no_temp_file(tmp_path: Path):
 def test_update_merges_domains_from_multiple_sources(monkeypatch, tmp_path: Path):
     manager = BlocklistManager(tmp_path / "blocklist.txt")
     responses = {
-        "http://a.example/hosts.txt": "0.0.0.0 a-ads.example\n",
-        "http://b.example/hosts.txt": "0.0.0.0 b-ads.example\n",
+        "https://a.example/hosts.txt": "0.0.0.0 a-ads.example\n",
+        "https://b.example/hosts.txt": "0.0.0.0 b-ads.example\n",
     }
 
     def fake_urlopen(request, timeout=None, context=None):
@@ -105,9 +105,22 @@ def test_update_merges_domains_from_multiple_sources(monkeypatch, tmp_path: Path
     assert manager.is_blocked("b-ads.example")
 
 
+def test_update_rejects_non_https_sources(monkeypatch, tmp_path: Path):
+    manager = BlocklistManager(tmp_path / "blocklist.txt")
+
+    def should_not_open(*_args, **_kwargs):
+        raise AssertionError("urlopen must not receive an insecure source")
+
+    monkeypatch.setattr("backend.dns.blocklists.urllib.request.urlopen", should_not_open)
+    result = manager.update(urls=["http://insecure.example/hosts.txt"])[0]
+
+    assert result.status == "error"
+    assert "HTTPS" in result.error
+
+
 def test_update_reports_error_for_one_failing_source_but_applies_the_other(monkeypatch, tmp_path: Path):
     manager = BlocklistManager(tmp_path / "blocklist.txt")
-    urls = ["http://good.example/hosts.txt", "http://bad.example/hosts.txt"]
+    urls = ["https://good.example/hosts.txt", "https://bad.example/hosts.txt"]
 
     def fake_urlopen(request, timeout=None, context=None):
         if "bad" in request.full_url:
@@ -119,20 +132,20 @@ def test_update_reports_error_for_one_failing_source_but_applies_the_other(monke
     results = manager.update(urls=urls)
     by_source = {result.source: result for result in results}
 
-    assert by_source["http://good.example/hosts.txt"].status == "ok"
-    assert by_source["http://bad.example/hosts.txt"].status == "error"
-    assert by_source["http://bad.example/hosts.txt"].error
+    assert by_source["https://good.example/hosts.txt"].status == "ok"
+    assert by_source["https://bad.example/hosts.txt"].status == "error"
+    assert by_source["https://bad.example/hosts.txt"].error
     assert manager.is_blocked("good-ads.example")
     assert not manager.is_blocked("bad-should-not-appear.example")
 
 
 def test_record_update_results_inserts_then_upserts_on_conflict(db_path):
     with models.get_conn(db_path) as conn:
-        record_update_results(conn, [UpdateResult("http://a.example/hosts.txt", 10, "ok")])
+        record_update_results(conn, [UpdateResult("https://a.example/hosts.txt", 10, "ok")])
 
     with models.get_conn(db_path) as conn:
         row = conn.execute(
-            "SELECT * FROM blocklist_metadata WHERE source = ?", ("http://a.example/hosts.txt",)
+            "SELECT * FROM blocklist_metadata WHERE source = ?", ("https://a.example/hosts.txt",)
         ).fetchone()
     assert row["domain_count"] == 10
     assert row["status"] == "ok"
@@ -142,16 +155,16 @@ def test_record_update_results_inserts_then_upserts_on_conflict(db_path):
     with models.get_conn(db_path) as conn:
         record_update_results(
             conn,
-            [UpdateResult("http://a.example/hosts.txt", 20, "error", "temporary failure")],
+            [UpdateResult("https://a.example/hosts.txt", 20, "error", "temporary failure")],
         )
 
     with models.get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM blocklist_metadata").fetchall()
         row = conn.execute(
-            "SELECT * FROM blocklist_metadata WHERE source = ?", ("http://a.example/hosts.txt",)
+            "SELECT * FROM blocklist_metadata WHERE source = ?", ("https://a.example/hosts.txt",)
         ).fetchone()
 
-    assert len(rows) == 1  # upsert, not a duplicate row
+    assert len(rows) == 1
     assert row["domain_count"] == 20
     assert row["status"] == "error"
     assert row["error"] == "temporary failure"

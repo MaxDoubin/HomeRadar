@@ -7,6 +7,7 @@ be correlated against it as fingerprinting becomes more version-specific.
 from __future__ import annotations
 
 import json
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
@@ -34,9 +35,19 @@ def parse_catalog(payload: dict) -> list[dict]:
     return records
 
 
+def _validated_catalog_url(value: str) -> str:
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme.lower() != "https" or not parsed.hostname:
+        raise ValueError("CISA catalog source must use an absolute HTTPS URL")
+    if parsed.username or parsed.password:
+        raise ValueError("CISA catalog source URL must not contain credentials")
+    return urllib.parse.urlunsplit(parsed)
+
+
 def update_catalog(conn, url: str = config.CISA_KEV_URL, timeout: float = 30) -> int:
-    request = urllib.request.Request(url, headers={"User-Agent": "HomeRadar/0.2"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    safe_url = _validated_catalog_url(url)
+    request = urllib.request.Request(safe_url, headers={"User-Agent": "HomeRadar/0.3"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310: HTTPS validated above
         payload = json.load(response)
     records = parse_catalog(payload)
     now = datetime.now(timezone.utc).isoformat()
