@@ -1,51 +1,52 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Build the frontend
-echo "Building frontend..."
-cd ../frontend
-npm install
-npm run build
-cd ../desktop
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+cd "${repo_root}"
 
-# Create resources directory
-mkdir -p resources
-mkdir -p resources/frontend
-cp -r ../frontend/dist resources/frontend/
+echo "Building Home Radar dashboard..."
+(
+  cd frontend
+  npm ci
+  npm run build
+)
 
-# Ensure virtual environment and install pyinstaller
-echo "Packaging backend..."
-cd ..
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
-fi
-# Fix for cross-platform venv activation
-if [ -f ".venv/Scripts/activate" ]; then
-    source .venv/Scripts/activate
+rm -rf desktop/resources
+mkdir -p desktop/resources/frontend
+cp -R frontend/dist desktop/resources/frontend/dist
+
+echo "Packaging Home Radar backend..."
+python3 -m venv .venv
+if [[ -f .venv/Scripts/python.exe ]]; then
+  python_cmd=".venv/Scripts/python.exe"
 else
-    source .venv/bin/activate
+  python_cmd=".venv/bin/python"
 fi
+"${python_cmd}" -m pip install --upgrade pip
+"${python_cmd}" -m pip install -r backend/requirements.txt pyinstaller
+"${python_cmd}" -m PyInstaller \
+  --clean \
+  --noconfirm \
+  --name homeradar-backend \
+  --onefile \
+  backend/main.py
 
-pip install -r backend/requirements.txt
-pip install pyinstaller
-
-PYINSTALLER_CMD="pyinstaller"
-
-# Determine OS and Pyinstaller flags
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # On macOS, --noconsole creates an .app bundle instead of a unix executable
-    # Electron hides the stdout/stderr of spawned processes anyway, so we just use --onefile
-    $PYINSTALLER_CMD --name homeradar-backend --onefile backend/main.py
+if [[ -f dist/homeradar-backend.exe ]]; then
+  cp dist/homeradar-backend.exe desktop/resources/homeradar-backend.exe
+elif [[ -f dist/homeradar-backend ]]; then
+  cp dist/homeradar-backend desktop/resources/homeradar-backend
+  chmod +x desktop/resources/homeradar-backend
 else
-    $PYINSTALLER_CMD --name homeradar-backend --onefile --noconsole backend/main.py
+  echo "PyInstaller did not produce the expected backend executable." >&2
+  exit 1
 fi
 
-if [ -f "dist/homeradar-backend.exe" ]; then
-    mv dist/homeradar-backend.exe desktop/resources/
-elif [ -f "dist/homeradar-backend" ]; then
-    mv dist/homeradar-backend desktop/resources/
-else
-    echo "PyInstaller output not found!"
-fi
+echo "Installing desktop dependencies..."
+(
+  cd desktop
+  npm ci
+  npm test
+)
 
-cd desktop
-echo "Done packaging resources."
+echo "Desktop resources are ready in desktop/resources/."
