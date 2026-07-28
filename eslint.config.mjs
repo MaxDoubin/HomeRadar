@@ -7,7 +7,7 @@ const unusedVars = [
   {
     argsIgnorePattern: "^_",
     caughtErrors: "none",
-    varsIgnorePattern: "^_",
+    varsIgnorePattern: "^(React|_)",
   },
 ];
 
