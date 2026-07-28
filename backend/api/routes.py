@@ -368,7 +368,7 @@ def get_blocklist_status():
 @router.get("/dns/stats")
 def get_dns_stats():
     if services.dns_proxy is None:
-        return {"running": False, "listeners": {}, "cache": {}, "upstreams": {}}
+        return {"running": False, "cache": {}, "upstreams": {}}
     stats = services.dns_proxy.stats()
     return {"running": bool(stats.get("running", True)), **stats}
 
