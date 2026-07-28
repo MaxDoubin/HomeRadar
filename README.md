@@ -66,6 +66,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 See [docs/DEVICE_FINGERPRINTING.md](docs/DEVICE_FINGERPRINTING.md) for the signal model.
 See [docs/SECURITY_PIPELINE.md](docs/SECURITY_PIPELINE.md) for DNS, intelligence, and trust scoring.
 See [docs/OPEN_SOURCE_INSPIRATION.md](docs/OPEN_SOURCE_INSPIRATION.md) for cited prior art.
+See [docs/OLD_LAPTOP_GUIDE.md](docs/OLD_LAPTOP_GUIDE.md) for a guide on repurposing an old laptop to run Home Radar.
 
 ## Contributing
 
