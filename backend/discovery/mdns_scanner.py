@@ -114,9 +114,10 @@ def discover(timeout: float = config.MDNS_DISCOVERY_TIMEOUT_SECONDS) -> dict[str
         }
     )
     lock = threading.Lock()
-    zeroconf = Zeroconf()
+    zeroconf = None
     browsers = []
     try:
+        zeroconf = Zeroconf()
         listener = _Listener(zeroconf, raw_results, lock)
         browsers = [ServiceBrowser(zeroconf, service_type, listener) for service_type in SERVICE_TYPES]
         time.sleep(max(0.05, timeout))
@@ -125,7 +126,8 @@ def discover(timeout: float = config.MDNS_DISCOVERY_TIMEOUT_SECONDS) -> dict[str
     finally:
         for browser in browsers:
             browser.cancel()
-        zeroconf.close()
+        if zeroconf is not None:
+            zeroconf.close()
 
     return {
         ip: {

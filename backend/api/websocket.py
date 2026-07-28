@@ -7,6 +7,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from backend.db import get_conn, models
 from backend.monitor.trust_scoring import household_score
+from backend.pairing import verify_token
 
 router = APIRouter()
 
@@ -32,6 +33,13 @@ def dashboard_snapshot() -> dict:
 
 @router.websocket("/ws")
 async def dashboard_websocket(websocket: WebSocket):
+    token = websocket.query_params.get("token")
+    if token:
+        with get_conn() as conn:
+            token_valid = verify_token(conn, token)
+        if not token_valid:
+            await websocket.close(code=4401)
+            return
     await websocket.accept()
     try:
         while True:

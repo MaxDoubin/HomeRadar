@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from backend.dns.blocklists import BlocklistManager, normalize_domain, parse_blocklist
+from backend.db import models
+from backend.dns.blocklists import (
+    BlocklistManager,
+    UpdateResult,
+    normalize_domain,
+    parse_blocklist,
+    record_update_results,
+)
 
 
 def test_parse_hosts_adblock_and_domain_formats():

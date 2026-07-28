@@ -22,3 +22,16 @@ iso/build/
 .vscode/
 .idea/
 .DS_Store
+
+# Mobile app build artifacts
+mobile/android/.gradle/
+mobile/android/.kotlin/
+mobile/android/**/build/
+mobile/android/local.properties
+mobile/ios/**/xcuserdata/
+mobile/ios/**/*.xcworkspace/xcuserdata/
+mobile/ios/DerivedData/
+
+# Test/coverage output
+.coverage
+.pytest_cache/
