@@ -7,7 +7,7 @@ from ipaddress import ip_address
 
 from backend import config
 from backend.db import models
-from backend.discovery.arp_scanner import scan as active_scan
+from backend.discovery.arp_scanner import scan as arp_scan
 from backend.discovery.device_fingerprint import fingerprint_device
 from backend.discovery.mdns_scanner import discover as mdns_discover
 from backend.discovery.neighbor_scanner import scan as neighbor_scan
@@ -43,15 +43,13 @@ def merge_discovery_results(
 ) -> list[dict]:
     """Combine discovery sources into fingerprintable hosts.
 
-    ``arp_hosts`` is retained as a public parameter name for compatibility, but
-    current builds populate it through privilege-free active neighbor discovery.
     MAC address remains the stable identity. mDNS/SSDP-only observations are
-    retained when the same IP exists in an active or cached neighbor result.
+    retained when the same IP exists in an ARP or operating-system neighbor result.
     """
     by_mac: dict[str, dict] = {}
     mac_by_ip: dict[str, str] = {}
 
-    for default_source, hosts in (("active_neighbor", arp_hosts), ("neighbor_cache", neighbor_hosts)):
+    for default_source, hosts in (("arp", arp_hosts), ("neighbor_cache", neighbor_hosts)):
         for host in hosts:
             mac = str(host.get("mac", "")).upper()
             ip = host.get("ip")
@@ -70,11 +68,11 @@ def merge_discovery_results(
 
     for source_name, observations in (("mdns", mdns_results), ("ssdp", ssdp_results)):
         for ip, observation in observations.items():
-            mac = mac_by_ip.get(ip)
-            if mac is None:
+            found_mac = mac_by_ip.get(ip)
+            if found_mac is None:
                 logger.debug("Skipping %s-only host %s because no MAC address is known", source_name, ip)
                 continue
-            target = by_mac[mac]["observation"]
+            target = by_mac[found_mac]["observation"]
             target["sources"] = sorted(set(target["sources"]) | {source_name})
             _merge_observation(target, observation)
 
@@ -85,7 +83,7 @@ def _discover_hosts() -> list[dict]:
     subnet = None if config.LAN_SUBNET == "auto" else config.LAN_SUBNET
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {
-            "active": pool.submit(_run_source, "active", lambda: active_scan(subnet=subnet)),
+            "ARP": pool.submit(_run_source, "ARP", lambda: arp_scan(subnet=subnet)),
             "neighbors": pool.submit(_run_source, "neighbors", neighbor_scan),
             "mDNS": pool.submit(_run_source, "mDNS", mdns_discover),
             "SSDP": pool.submit(_run_source, "SSDP", ssdp_discover),
@@ -93,15 +91,15 @@ def _discover_hosts() -> list[dict]:
         results = {name: future.result() for name, future in futures.items()}
 
     hosts = merge_discovery_results(
-        results["active"],
+        results["ARP"],
         results["neighbors"],
         results["mDNS"],
         results["SSDP"],
     )
     logger.info(
-        "Discovery found %d host(s): active=%d neighbor=%d mDNS=%d SSDP=%d",
+        "Discovery found %d host(s): ARP=%d neighbor=%d mDNS=%d SSDP=%d",
         len(hosts),
-        len(results["active"]),
+        len(results["ARP"]),
         len(results["neighbors"]),
         len(results["mDNS"]),
         len(results["SSDP"]),
