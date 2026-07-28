@@ -4,12 +4,15 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import ssl
 import tempfile
 import threading
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+import certifi
 
 from backend import config
 
@@ -67,6 +70,16 @@ class UpdateResult:
     error: str | None = None
 
 
+def _https_context() -> ssl.SSLContext:
+    """Return a TLS context backed by certifi's CA bundle.
+
+    Frozen Python applications cannot always locate the operating system trust
+    store. Using certifi makes HTTPS verification deterministic without ever
+    disabling certificate validation.
+    """
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 class BlocklistManager:
     """Thread-safe exact and parent-domain matcher."""
 
@@ -117,12 +130,13 @@ class BlocklistManager:
     def update(self, urls: list[str] | None = None, timeout: float = 30) -> list[UpdateResult]:
         merged: set[str] = set()
         results: list[UpdateResult] = []
+        context = _https_context()
         for url in urls or config.BLOCKLIST_URLS:
             try:
                 request = urllib.request.Request(
-                    url, headers={"User-Agent": "HomeRadar/0.2 blocklist updater"}
+                    url, headers={"User-Agent": "HomeRadar/0.3 blocklist updater"}
                 )
-                with urllib.request.urlopen(request, timeout=timeout) as response:
+                with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
                     text = response.read(50_000_000).decode("utf-8", "replace")
                 domains = parse_blocklist(text)
                 merged.update(domains)
