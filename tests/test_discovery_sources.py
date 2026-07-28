@@ -1,3 +1,4 @@
+from backend.discovery import arp_scanner
 from backend.discovery.neighbor_scanner import parse_neighbor_output
 from backend.discovery.scan_runner import merge_discovery_results
 from backend.discovery.ssdp_scanner import parse_response
@@ -35,9 +36,41 @@ def test_parse_bsd_arp_cache():
     assert parse_neighbor_output(output)[0]["mac"] == "B8:27:EB:00:00:01"
 
 
+def test_active_scan_primes_and_filters_neighbor_cache(monkeypatch):
+    probed = []
+    monkeypatch.setattr(arp_scanner, "_probe_host", probed.append)
+    monkeypatch.setattr(arp_scanner.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        arp_scanner,
+        "neighbor_scan",
+        lambda: [
+            {"ip": "192.168.1.1", "mac": "aa:bb:cc:dd:ee:01"},
+            {"ip": "192.168.1.2", "mac": "aa:bb:cc:dd:ee:02"},
+            {"ip": "10.0.0.1", "mac": "aa:bb:cc:dd:ee:03"},
+        ],
+    )
+
+    results = arp_scanner.scan("192.168.1.0/30", timeout=0)
+
+    assert set(probed) == {"192.168.1.1", "192.168.1.2"}
+    assert [item["ip"] for item in results] == ["192.168.1.1", "192.168.1.2"]
+    assert all(item["source"] == "active_neighbor" for item in results)
+
+
+def test_active_scan_rejects_oversized_subnet(monkeypatch):
+    monkeypatch.setattr(arp_scanner, "neighbor_scan", lambda: [])
+    assert arp_scanner.scan("10.0.0.0/8", timeout=0) == []
+
+
 def test_merge_discovery_sources_enriches_matching_host():
     hosts = merge_discovery_results(
-        arp_hosts=[{"ip": "192.168.1.20", "mac": "AA:BB:CC:DD:EE:FF"}],
+        arp_hosts=[
+            {
+                "ip": "192.168.1.20",
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "source": "active_neighbor",
+            }
+        ],
         neighbor_hosts=[],
         mdns_results={
             "192.168.1.20": {
@@ -56,7 +89,7 @@ def test_merge_discovery_sources_enriches_matching_host():
     )
     assert len(hosts) == 1
     observation = hosts[0]["observation"]
-    assert observation["sources"] == ["arp", "mdns", "ssdp"]
+    assert observation["sources"] == ["active_neighbor", "mdns", "ssdp"]
     assert observation["model"] == "Chromecast"
     assert "_googlecast._tcp.local." in observation["mdns_services"]
 
