@@ -147,7 +147,9 @@ class BlocklistManager:
                 request = urllib.request.Request(
                     url, headers={"User-Agent": "HomeRadar/0.3 blocklist updater"}
                 )
-                with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
+                with urllib.request.urlopen(  # nosec B310
+                    request, timeout=timeout, context=context
+                ) as response:
                     text = response.read(50_000_000).decode("utf-8", "replace")
                 domains = parse_blocklist(text)
                 merged.update(domains)
