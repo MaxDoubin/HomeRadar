@@ -30,6 +30,7 @@ fi
   --noconfirm \
   --name homeradar-backend \
   --onefile \
+  --add-data "backend/db/schema.sql:backend/db" \
   backend/main.py
 
 if [[ -f dist/homeradar-backend.exe ]]; then
