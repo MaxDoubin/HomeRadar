@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const TOKEN_KEY = "homeradar_token";
-const SEED_TOKEN = "seed-token-existing";
 
 vi.hoisted(() => {
   try {
@@ -16,7 +15,7 @@ vi.mock("./demo", () => ({
   demoDashboardSocket: vi.fn(),
 }));
 
-import { api, dashboardSocket, getStoredToken, setStoredToken, tokenReady } from "./api";
+import { api, dashboardSocket, getStoredToken, setStoredToken } from "./api";
 
 function clearPairingUi() {
   document.querySelector(".hr-pairing-gate")?.remove();
@@ -127,10 +126,10 @@ describe("secure bootstrap and pairing", () => {
 
     const freshApi = await import("./api");
     const ready = freshApi.tokenReady();
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const gate = document.querySelector(".hr-pairing-gate");
+    expect(gate).not.toBeNull();
     const input = gate.querySelector("input");
     input.value = "123456";
     gate.querySelector("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
@@ -138,6 +137,14 @@ describe("secure bootstrap and pairing", () => {
     await expect(ready).resolves.toBe("paired-token");
     expect(freshApi.getStoredToken()).toBe("paired-token");
     expect(document.querySelector(".hr-pairing-gate")).toBeNull();
+  });
+
+  it("resolves immediately from a token already stored in a fresh module", async () => {
+    localStorage.setItem(TOKEN_KEY, "fresh-seed-token");
+    vi.stubGlobal("fetch", vi.fn());
+    const freshApi = await import("./api");
+    await expect(freshApi.tokenReady()).resolves.toBe("fresh-seed-token");
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -164,8 +171,7 @@ describe("dashboardSocket", () => {
   it("waits for authentication and opens an encoded WebSocket URL", async () => {
     const onSnapshot = vi.fn();
     const wrapper = dashboardSocket(onSnapshot);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const socket = FakeWebSocket.instances[0];
     expect(socket.url).toContain(`?token=${encodeURIComponent("socket token/special")}`);
 
@@ -178,8 +184,7 @@ describe("dashboardSocket", () => {
   it("ignores non-snapshot messages", async () => {
     const onSnapshot = vi.fn();
     dashboardSocket(onSnapshot);
-    await Promise.resolve();
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     FakeWebSocket.instances[0].onmessage({ data: JSON.stringify({ type: "ping" }) });
     expect(onSnapshot).not.toHaveBeenCalled();
   });
@@ -205,12 +210,5 @@ describe("demo mode", () => {
     const socket = dashboardSocket(vi.fn());
     expect(demoDashboardSocket).toHaveBeenCalled();
     expect(socket).toBeTruthy();
-  });
-});
-
-describe("existing-token readiness", () => {
-  it("resolves the token present when the module was imported", async () => {
-    setStoredToken(SEED_TOKEN);
-    await expect(tokenReady()).resolves.toBe(SEED_TOKEN);
   });
 });
