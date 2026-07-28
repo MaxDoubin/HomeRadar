@@ -15,7 +15,8 @@ discovery with a local DNS firewall, community blocklists, optional reputation f
 behavior-based trust scoring, real-time alerts, weekly digests, and a responsive React
 dashboard. Per-device internet pauses, quiet-hour schedules, custom domain rules, and
 non-invasive service-exposure findings add family controls without attempting passwords
-or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included.
+or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included,
+as well as native iOS (SwiftUI) and Android (Kotlin) companion apps for mobile push notifications.
 
 It remains development software until it completes real-network, old-hardware, DNS
 failover, and week-long reliability testing.
@@ -42,6 +43,7 @@ python3 -m venv .venv
 ```
 
 For frontend development, run `npm install && npm run dev` in `frontend/`.
+To run frontend tests, run `npm run test` in `frontend/`.
 
 ## How it works
 
