@@ -21,6 +21,7 @@ from backend.monitor.trust_scoring import recalculate_all
 from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
 from backend.monitor.exposure_audit import audit_all
 from backend.maintenance import backup_if_due, cleanup_database
+from backend.security import ApplianceSecurityMiddleware
 from backend.services import blocklists
 from backend import services
 
@@ -123,14 +124,24 @@ async def lifespan(app: FastAPI):
             traffic_thread.join(timeout=2)
 
 
-app = FastAPI(title="Home Radar", version="0.2.0", lifespan=lifespan)
+app = FastAPI(
+    title="Home Radar",
+    version="0.3.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+)
 
+# Cross-origin access is disabled by default. The dashboard is served from this
+# same process, and native mobile clients do not require browser CORS. Operators
+# can explicitly opt in trusted origins through HOMERADAR_CORS_ORIGINS.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ALLOW_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-HomeRadar-Token"],
 )
+app.add_middleware(ApplianceSecurityMiddleware)
 
 app.include_router(api_router)
 app.include_router(websocket_router)
