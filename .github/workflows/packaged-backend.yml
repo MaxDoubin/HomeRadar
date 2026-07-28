@@ -50,7 +50,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt pyinstaller
-          python -m PyInstaller --clean --noconfirm --name homeradar-backend --onefile backend/main.py
+          python -m PyInstaller --clean --noconfirm --name homeradar-backend --onefile --add-data "backend/db/schema.sql:backend/db" backend/main.py
 
       - name: Launch frozen backend and verify health
         run: python scripts/smoke_packaged_backend.py "${{ matrix.executable }}"
