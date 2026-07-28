@@ -22,6 +22,7 @@ from backend.maintenance import (
     prune_backups,
 )
 from backend.services import blocklists
+from backend import services
 
 router = APIRouter()
 
@@ -258,6 +259,21 @@ def get_blocklist_status():
             ).fetchall()
         ]
     return {"domain_count": blocklists.count, "path": str(blocklists.path), "sources": sources}
+
+
+@router.get("/dns/stats")
+def get_dns_stats():
+    if services.dns_proxy is None:
+        return {"running": False, "cache": {}, "upstreams": {}}
+    return {"running": True, **services.dns_proxy.stats()}
+
+
+@router.post("/dns/cache/clear")
+def clear_dns_cache():
+    if services.dns_proxy is None:
+        raise HTTPException(status_code=503, detail="DNS proxy is not running")
+    services.dns_proxy.cache.clear()
+    return {"cleared": True, "cache": services.dns_proxy.cache.stats()}
 
 
 @router.post("/blocklists/update")

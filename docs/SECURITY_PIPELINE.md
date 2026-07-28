@@ -17,6 +17,10 @@ StevenBlack and OISD endpoints are defaults, can be replaced by environment conf
 and update through a systemd timer or the API. The proxy keeps serving the previous list
 if a download fails.
 
+Allowed answers use a bounded TTL-aware memory cache. Simultaneous identical misses are
+coalesced into one upstream request, and multiple resolver IPs fail over in observed
+health and latency order. Cache and resolver behavior is visible through `/dns/stats`.
+
 ## Threat intelligence
 
 Public destination IPs can be checked against AbuseIPDB when an API key is configured.

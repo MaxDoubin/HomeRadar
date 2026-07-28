@@ -22,6 +22,7 @@ from backend.monitor.traffic_analyzer import PassiveTrafficMonitor
 from backend.monitor.exposure_audit import audit_all
 from backend.maintenance import backup_if_due, cleanup_database
 from backend.services import blocklists
+from backend import services
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("homeradar.main")
@@ -90,6 +91,7 @@ async def lifespan(app: FastAPI):
     traffic_thread = None
     if config.DNS_ENABLED:
         dns_proxy = DNSProxy(blocklists)
+        services.dns_proxy = dns_proxy
         dns_thread = threading.Thread(
             target=dns_proxy.serve_forever,
             daemon=True,
@@ -112,6 +114,7 @@ async def lifespan(app: FastAPI):
         await asyncio.gather(*tasks, return_exceptions=True)
         if dns_proxy:
             dns_proxy.stop()
+            services.dns_proxy = None
         if dns_thread:
             dns_thread.join(timeout=2)
         if traffic_monitor:

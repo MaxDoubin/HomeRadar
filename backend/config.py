@@ -35,8 +35,15 @@ DNS_ENABLED = os.environ.get("HOMERADAR_DNS_ENABLED", "false").lower() in {"1", 
 DNS_HOST = os.environ.get("HOMERADAR_DNS_HOST", "0.0.0.0")
 DNS_PORT = int(os.environ.get("HOMERADAR_DNS_PORT", "5354"))
 DNS_UPSTREAM = os.environ.get("HOMERADAR_DNS_UPSTREAM", "1.1.1.1")
+DNS_UPSTREAMS = [
+    value.strip()
+    for value in os.environ.get("HOMERADAR_DNS_UPSTREAMS", DNS_UPSTREAM).split(",")
+    if value.strip()
+]
 DNS_UPSTREAM_PORT = int(os.environ.get("HOMERADAR_DNS_UPSTREAM_PORT", "53"))
 DNS_TIMEOUT_SECONDS = float(os.environ.get("HOMERADAR_DNS_TIMEOUT", "3"))
+DNS_CACHE_SIZE = int(os.environ.get("HOMERADAR_DNS_CACHE_SIZE", "4096"))
+DNS_CACHE_MAX_TTL = int(os.environ.get("HOMERADAR_DNS_CACHE_MAX_TTL", "3600"))
 BLOCKLIST_PATH = Path(
     os.environ.get("HOMERADAR_BLOCKLIST_PATH", str(DATA_DIR / "blocklist.txt"))
 )

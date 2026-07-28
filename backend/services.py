@@ -2,3 +2,4 @@
 from backend.dns.blocklists import BlocklistManager
 
 blocklists = BlocklistManager()
+dns_proxy = None

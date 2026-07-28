@@ -5,6 +5,7 @@ import logging
 import ipaddress
 import socket
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
@@ -13,6 +14,7 @@ from dnslib import DNSHeader, DNSRecord, QTYPE, RCODE
 from backend import config
 from backend.db import get_conn, models
 from backend.dns.blocklists import BlocklistManager
+from backend.dns.cache import DNSCache, cache_key
 from backend.dns.policy import evaluate_policy
 
 logger = logging.getLogger("homeradar.dns")
@@ -74,6 +76,11 @@ class DNSProxy:
         self._tcp_socket: socket.socket | None = None
         self._tcp_thread: threading.Thread | None = None
         self._pool = ThreadPoolExecutor(max_workers=32, thread_name_prefix="dns-query")
+        self.cache = DNSCache(config.DNS_CACHE_SIZE, config.DNS_CACHE_MAX_TTL)
+        self._upstream_stats: dict[str, dict] = {}
+        self._stats_lock = threading.Lock()
+        self._inflight: dict[tuple, threading.Event] = {}
+        self._inflight_lock = threading.Lock()
 
     def serve_forever(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
@@ -119,31 +126,101 @@ class DNSProxy:
             chunks.extend(chunk)
         return bytes(chunks)
 
-    def _upstream(self) -> tuple[str, int]:
-        if not self.dynamic_upstream:
-            return self.upstream
-        with get_conn() as conn:
-            configured = models.get_setting(conn, "dns_upstream", self.upstream[0])
-        try:
-            ipaddress.ip_address(configured)
-            return configured, self.upstream[1]
-        except ValueError:
-            return self.upstream
+    def _upstreams(self) -> list[tuple[str, int]]:
+        candidates = [self.upstream[0]] if not self.dynamic_upstream else config.DNS_UPSTREAMS
+        if self.dynamic_upstream:
+            with get_conn() as conn:
+                configured = models.get_setting(conn, "dns_upstream")
+            if configured:
+                candidates = [value.strip() for value in configured.split(",") if value.strip()]
+        valid = []
+        for candidate in candidates:
+            try:
+                ipaddress.ip_address(candidate)
+                valid.append((candidate, self.upstream[1]))
+            except ValueError:
+                continue
+        if not valid:
+            valid = [self.upstream]
+        with self._stats_lock:
+            return sorted(
+                valid,
+                key=lambda item: (
+                    self._upstream_stats.get(item[0], {}).get("failures", 0),
+                    self._upstream_stats.get(item[0], {}).get("latency_ms", float("inf")),
+                ),
+            )
 
-    def _forward_tcp(self, payload: bytes) -> bytes:
-        with socket.create_connection(self._upstream(), timeout=config.DNS_TIMEOUT_SECONDS) as connection:
+    def _record_upstream(self, address: str, elapsed: float | None) -> None:
+        with self._stats_lock:
+            stats = self._upstream_stats.setdefault(
+                address, {"queries": 0, "failures": 0, "latency_ms": 0.0}
+            )
+            stats["queries"] += 1
+            if elapsed is None:
+                stats["failures"] += 1
+            else:
+                previous = stats["latency_ms"]
+                stats["latency_ms"] = round(
+                    elapsed * 1000 if not previous else previous * 0.8 + elapsed * 1000 * 0.2,
+                    2,
+                )
+                stats["failures"] = max(0, stats["failures"] - 1)
+
+    def _forward_tcp(self, payload: bytes, upstream: tuple[str, int]) -> bytes:
+        with socket.create_connection(upstream, timeout=config.DNS_TIMEOUT_SECONDS) as connection:
             connection.sendall(len(payload).to_bytes(2, "big") + payload)
             response_size = int.from_bytes(self._receive_exact(connection, 2), "big")
             return self._receive_exact(connection, response_size)
 
     def _forward(self, payload: bytes) -> bytes:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as upstream_socket:
-            upstream_socket.settimeout(config.DNS_TIMEOUT_SECONDS)
-            upstream_socket.sendto(payload, self._upstream())
-            response = upstream_socket.recvfrom(65535)[0]
-        if DNSRecord.parse(response).header.tc:
-            return self._forward_tcp(payload)
-        return response
+        last_error = None
+        for upstream in self._upstreams():
+            started = time.monotonic()
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as upstream_socket:
+                    upstream_socket.settimeout(config.DNS_TIMEOUT_SECONDS)
+                    upstream_socket.sendto(payload, upstream)
+                    response = upstream_socket.recvfrom(65535)[0]
+                if DNSRecord.parse(response).header.tc:
+                    response = self._forward_tcp(payload, upstream)
+                self._record_upstream(upstream[0], time.monotonic() - started)
+                return response
+            except OSError as exc:
+                last_error = exc
+                self._record_upstream(upstream[0], None)
+        raise last_error or OSError("no valid DNS upstream is configured")
+
+    def _resolve(self, payload: bytes) -> bytes:
+        request = DNSRecord.parse(payload)
+        key = cache_key(payload)
+        cached = self.cache.get(key, request.header.id)
+        if cached:
+            return cached
+        with self._inflight_lock:
+            event = self._inflight.get(key)
+            owner = event is None
+            if owner:
+                event = self._inflight[key] = threading.Event()
+        if not owner:
+            event.wait(config.DNS_TIMEOUT_SECONDS * max(1, len(self._upstreams())))
+            cached = self.cache.get(key, request.header.id)
+            if cached:
+                return cached
+        try:
+            response = self._forward(payload)
+            self.cache.put(key, response)
+            return response
+        finally:
+            if owner:
+                with self._inflight_lock:
+                    self._inflight.pop(key, None)
+                    event.set()
+
+    def stats(self) -> dict:
+        with self._stats_lock:
+            upstreams = {key: dict(value) for key, value in self._upstream_stats.items()}
+        return {"cache": self.cache.stats(), "upstreams": upstreams}
 
     def _process(self, payload: bytes, client_ip: str) -> bytes | None:
         response: bytes | None = None
@@ -160,7 +237,7 @@ class DNSProxy:
             elif decision.blocked:
                 response = blocked_response(payload)
             else:
-                response = self._forward(payload)
+                response = self._resolve(payload)
             with get_conn() as conn:
                 models.log_traffic(
                     conn,
