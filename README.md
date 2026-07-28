@@ -17,8 +17,8 @@ dashboard. Per-device internet pauses, quiet-hour schedules, custom domain rules
 non-invasive service-exposure findings add family controls without attempting passwords
 or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included,
 as well as native iOS (SwiftUI) and Android (Kotlin) companion apps for mobile push notifications.
-
 Experimental ML-based anomaly detection using scikit-learn is now included, as well as an active deauth defense mechanism.
+
 
 It remains development software until it completes real-network, old-hardware, DNS
 failover, and week-long reliability testing.
