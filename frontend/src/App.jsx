@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, dashboardSocket, setStoredToken } from "./api";
 
-const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings"];
+const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings", "Advanced"];
 const deviceGlyphs = {
   phone: "▯", tablet: "▭", computer: "⌨", server: "▤", router: "⌁",
   access_point: "⌁", network_switch: "⇄", printer: "▱", iot_camera: "◉",
@@ -32,6 +32,7 @@ function Icon({ name }) {
     traffic: <><path d="M4 18V9M10 18V5M16 18v-7M22 18V3"/></>,
     alerts: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a2 2 0 0 0 .4 2.2l.1.1-2.6 2.6-.1-.1a2 2 0 0 0-2.2-.4 2 2 0 0 0-1.2 1.8V21h-3.6v-.2A2 2 0 0 0 9 19a2 2 0 0 0-2.2.4l-.1.1-2.6-2.6.1-.1A2 2 0 0 0 4.6 15 2 2 0 0 0 2.8 14H2v-4h.8A2 2 0 0 0 4.6 9a2 2 0 0 0-.4-2.2l-.1-.1 2.6-2.6.1.1A2 2 0 0 0 9 4.6 2 2 0 0 0 10.2 3V2h3.6v1A2 2 0 0 0 15 4.6a2 2 0 0 0 2.2-.4l.1-.1 2.6 2.6-.1.1A2 2 0 0 0 19.4 9a2 2 0 0 0 1.8 1H22v4h-.8a2 2 0 0 0-1.8 1Z"/></>,
+    advanced: <><line x1="4" y1="21" x2="4" y2="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="4" y1="10" x2="4" y2="3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="21" x2="12" y2="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="12" y1="8" x2="12" y2="3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="20" y1="21" x2="20" y2="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="20" y1="12" x2="20" y2="3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="1" y1="14" x2="7" y2="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="9" y1="8" x2="15" y2="8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><line x1="17" y1="16" x2="23" y2="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></>,
   };
   return <svg className="icon" viewBox="0 0 24 24">{paths[name]}</svg>;
 }
@@ -233,40 +234,11 @@ function SetupWizard({ onComplete }) {
 function Settings() {
   const [form, setForm] = useState({});
   const [message, setMessage] = useState("");
-  const [health, setHealth] = useState(null);
-  const [backups, setBackups] = useState([]);
-  const [pairing, setPairing] = useState(null); // {code, expiresAt}
-  const [pairError, setPairError] = useState("");
-  const [pairBusy, setPairBusy] = useState(false);
-  const [regenMessage, setRegenMessage] = useState("");
-  const [regenBusy, setRegenBusy] = useState(false);
-  const [now, setNow] = useState(Date.now());
-  const [blocklists, setBlocklists] = useState(null);
-  const [blocklistBusy, setBlocklistBusy] = useState(false);
   const [digestPreview, setDigestPreview] = useState(null);
   const [digestBusy, setDigestBusy] = useState(false);
   const [digestSentMsg, setDigestSentMsg] = useState("");
-  const [cisaQuery, setCisaQuery] = useState("");
-  const [cisaResults, setCisaResults] = useState(null);
-  const [cisaBusy, setCisaBusy] = useState(false);
-  const [cisaUpdateBusy, setCisaUpdateBusy] = useState(false);
-  const [cisaMsg, setCisaMsg] = useState("");
-  const refreshSystem = () => {
-    api("/health").then(setHealth);
-    api("/backups").then((result)=>setBackups(result.backups));
-    api("/blocklists").then(setBlocklists);
-  };
-  useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
 
-  const updateBlocklists = async () => {
-    setBlocklistBusy(true);
-    try {
-      const result = await api("/blocklists/update", { method: "POST" });
-      setBlocklists(result);
-    } finally {
-      setBlocklistBusy(false);
-    }
-  };
+  useEffect(() => { api("/settings").then(setForm); }, []);
 
   const loadDigestPreview = async () => {
     try {
@@ -287,6 +259,80 @@ function Settings() {
       setDigestSentMsg("Error: " + e.message);
     } finally {
       setDigestBusy(false);
+    }
+  };
+
+  const save = async (event) => {
+    event.preventDefault();
+    if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
+    setMessage("Settings saved");
+  };
+
+  return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household and digest preferences.</p></div></div>
+    <div className="settings-grid">
+      <form className="card settings-form" onSubmit={save} style={{gridColumn: "1 / -1"}}>
+        <label><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({...form, household_name:e.target.value})}/></label>
+        <label><span>Weekly digest email</span><input type="email" value={form.digest_email || ""} onChange={(e) => setForm({...form, digest_email:e.target.value})} placeholder="family@example.com"/></label>
+        <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while the dashboard is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({...form, notifications_enabled:e.target.checked})}/></label>
+        <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
+      </form>
+      <aside className="card system-card" style={{gridColumn: "1 / -1", width: "100%", maxWidth: "680px"}}>
+        <p className="eyebrow">COMMUNICATION</p>
+        <h2>Weekly Digest</h2>
+        <p className="subtle">Preview or manually send the security digest.</p>
+        {digestPreview ? (
+          <div style={{ marginTop: "10px", padding: "10px", background: "#0a1915", borderRadius: "7px", border: "1px solid var(--line)" }}>
+            <strong style={{ display: "block", marginBottom: "5px", fontSize: "10px" }}>Subject: {digestPreview.subject}</strong>
+            <pre style={{ margin: 0, fontSize: "9px", whiteSpace: "pre-wrap", color: "var(--muted)" }}>{digestPreview.body}</pre>
+          </div>
+        ) : (
+          <button onClick={loadDigestPreview} style={{ marginTop: "14px", maxWidth: "200px" }}>Preview Digest</button>
+        )}
+        <button onClick={sendDigest} disabled={digestBusy} style={{ marginTop: "14px", background: "var(--green)", color: "#062016", maxWidth: "200px" }}>
+          {digestBusy ? "Sending…" : "Send Digest Now"}
+        </button>
+        {digestSentMsg && <p className={digestSentMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{digestSentMsg}</p>}
+      </aside>
+    </div>
+  </section>;
+}
+
+function Advanced() {
+  const [form, setForm] = useState({});
+  const [message, setMessage] = useState("");
+  const [health, setHealth] = useState(null);
+  const [backups, setBackups] = useState([]);
+  const [pairing, setPairing] = useState(null);
+  const [pairError, setPairError] = useState("");
+  const [pairBusy, setPairBusy] = useState(false);
+  const [regenMessage, setRegenMessage] = useState("");
+  const [regenBusy, setRegenBusy] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const [blocklists, setBlocklists] = useState(null);
+  const [blocklistBusy, setBlocklistBusy] = useState(false);
+  const [cisaQuery, setCisaQuery] = useState("");
+  const [cisaResults, setCisaResults] = useState(null);
+  const [cisaBusy, setCisaBusy] = useState(false);
+  const [cisaUpdateBusy, setCisaUpdateBusy] = useState(false);
+  const [cisaMsg, setCisaMsg] = useState("");
+
+  const refreshSystem = () => {
+    api("/health").then(setHealth);
+    api("/backups").then((result)=>setBackups(result.backups));
+    api("/blocklists").then(setBlocklists);
+  };
+  useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
+
+  const updateBlocklists = async () => {
+    setBlocklistBusy(true);
+    try {
+      const result = await api("/blocklists/update", { method: "POST" });
+      setBlocklists(result);
+    } finally {
+      setBlocklistBusy(false);
     }
   };
 
@@ -315,6 +361,7 @@ function Settings() {
       setCisaUpdateBusy(false);
     }
   };
+
   useEffect(() => {
     if (!pairing) return;
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -322,14 +369,13 @@ function Settings() {
   }, [pairing]);
   const pairRemaining = pairing ? Math.max(0, Math.round((pairing.expiresAt - now) / 1000)) : 0;
   useEffect(() => { if (pairing && pairRemaining <= 0) setPairing(null); }, [pairRemaining, pairing]);
+
   const save = async (event) => {
     event.preventDefault();
-    if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
-      await Notification.requestPermission();
-    }
     setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
-    setMessage("Settings saved");
+    setMessage("Advanced settings saved");
   };
+
   const startPairing = async () => {
     setPairBusy(true);
     setPairError("");
@@ -342,6 +388,7 @@ function Settings() {
       setPairBusy(false);
     }
   };
+
   const regenerateToken = async () => {
     setRegenBusy(true);
     setRegenMessage("");
@@ -355,86 +402,70 @@ function Settings() {
       setRegenBusy(false);
     }
   };
-  return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household, DNS, and digest preferences.</p></div></div>
-    <div className="settings-grid"><form className="card settings-form" onSubmit={save}>
-      <label><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({...form, household_name:e.target.value})}/></label>
-      <label><span>Weekly digest email</span><input type="email" value={form.digest_email || ""} onChange={(e) => setForm({...form, digest_email:e.target.value})} placeholder="family@example.com"/></label>
-      <label><span>Upstream DNS resolver</span><input value={form.dns_upstream || ""} onChange={(e) => setForm({...form, dns_upstream:e.target.value})}/></label>
-      <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while the dashboard is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({...form, notifications_enabled:e.target.checked})}/></label>
-      <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
-    </form><aside className="card system-card"><p className="eyebrow">SYSTEM HEALTH</p><h2 className={health?.status === "healthy" ? "good":"warn"}>{health?.status || "Checking…"}</h2>
-      <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "—"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"—"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
-      {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
-      <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
-      {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
-    </aside>
-    <aside className="card system-card">
-      <p className="eyebrow">THREAT INTEL</p>
-      <h2>Blocklists</h2>
-      <p className="subtle">Ad and malware domains currently blocked.</p>
-      <div className="system-metrics">
-        <p><span>DOMAINS</span><b>{blocklists?.domain_count?.toLocaleString() || "0"}</b></p>
-        <p><span>SOURCES</span><b>{blocklists?.sources?.length || "0"}</b></p>
-      </div>
-      <button onClick={updateBlocklists} disabled={blocklistBusy} style={{ marginTop: "14px" }}>
-        {blocklistBusy ? "Updating…" : "Update blocklists"}
-      </button>
-    </aside>
-    <aside className="card system-card">
-      <p className="eyebrow">COMMUNICATION</p>
-      <h2>Weekly Digest</h2>
-      <p className="subtle">Preview or manually send the security digest.</p>
-      {digestPreview ? (
-        <div style={{ marginTop: "10px", padding: "10px", background: "#0a1915", borderRadius: "7px", border: "1px solid var(--line)" }}>
-          <strong style={{ display: "block", marginBottom: "5px", fontSize: "10px" }}>Subject: {digestPreview.subject}</strong>
-          <pre style={{ margin: 0, fontSize: "9px", whiteSpace: "pre-wrap", color: "var(--muted)" }}>{digestPreview.body}</pre>
-        </div>
-      ) : (
-        <button onClick={loadDigestPreview} style={{ marginTop: "14px" }}>Preview Digest</button>
-      )}
-      <button onClick={sendDigest} disabled={digestBusy} style={{ marginTop: "14px", background: "var(--green)", color: "#062016" }}>
-        {digestBusy ? "Sending…" : "Send Digest Now"}
-      </button>
-      {digestSentMsg && <p className={digestSentMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{digestSentMsg}</p>}
-    </aside>
-    <aside className="card system-card pairing-card">
-      <p className="eyebrow">THREAT INTEL</p>
-      <h2>CISA KEV Catalog</h2>
-      <p className="subtle">Search the Known Exploited Vulnerabilities catalog.</p>
-      <form onSubmit={searchCisa} style={{ display: "flex", gap: "10px", marginTop: "14px", marginBottom: "14px" }}>
-        <input type="text" value={cisaQuery} onChange={(e) => setCisaQuery(e.target.value)} placeholder="Search vendor, product, or CVE..." style={{ flex: 1, padding: "8px", background: "#071511", border: "1px solid var(--line)", borderRadius: "7px", color: "var(--text)" }} />
-        <button type="submit" disabled={cisaBusy} style={{ padding: "8px 12px" }}>{cisaBusy ? "..." : "Search"}</button>
+
+  return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Advanced Settings</h1><p className="subtle">Configure advanced networking, DNS, and threat intel.</p></div></div>
+    <div className="settings-grid">
+      <form className="card settings-form" onSubmit={save}>
+        <label><span>Upstream DNS resolver</span><input value={form.dns_upstream || ""} onChange={(e) => setForm({...form, dns_upstream:e.target.value})}/></label>
+        <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
       </form>
-      {cisaResults && (
-        <div style={{ maxHeight: "200px", overflowY: "auto", background: "#0a1915", border: "1px solid var(--line)", borderRadius: "7px", padding: "10px" }}>
-          {cisaResults.length === 0 ? <p className="subtle">No results found.</p> : cisaResults.map(r => (
-            <div key={r.cve_id} style={{ borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
-              <strong style={{ color: "var(--amber)", fontSize: "11px" }}>{r.cve_id}</strong>
-              <p style={{ margin: "4px 0", fontSize: "10px" }}>{r.vendor_project} {r.product}</p>
-              <small style={{ color: "var(--muted)", fontSize: "9px" }}>{r.vulnerability_name}</small>
-            </div>
-          ))}
+      <aside className="card system-card"><p className="eyebrow">SYSTEM HEALTH</p><h2 className={health?.status === "healthy" ? "good":"warn"}>{health?.status || "Checking…"}</h2>
+        <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "—"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"—"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
+        {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
+        <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
+        {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
+      </aside>
+      <aside className="card system-card">
+        <p className="eyebrow">THREAT INTEL</p>
+        <h2>Blocklists</h2>
+        <p className="subtle">Ad and malware domains currently blocked.</p>
+        <div className="system-metrics">
+          <p><span>DOMAINS</span><b>{blocklists?.domain_count?.toLocaleString() || "0"}</b></p>
+          <p><span>SOURCES</span><b>{blocklists?.sources?.length || "0"}</b></p>
         </div>
-      )}
-      <button onClick={updateCisa} disabled={cisaUpdateBusy} style={{ marginTop: "14px", width: "100%" }}>
-        {cisaUpdateBusy ? "Updating…" : "Update Catalog"}
-      </button>
-      {cisaMsg && <p className={cisaMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{cisaMsg}</p>}
-    </aside>
-    <aside className="card system-card pairing-card">
-      <p className="eyebrow">DEVICE PAIRING</p>
-      <h2>Pair a mobile device</h2>
-      <p className="subtle">Generate a one-time code to link a phone or tablet to this appliance.</p>
-      {pairing
-        ? <div className="pairing-code-block"><strong className="pairing-code">{pairing.code}</strong><small>Expires in {pairRemaining}s</small></div>
-        : <button onClick={startPairing} disabled={pairBusy}>{pairBusy ? "Generating…" : "Generate pairing code"}</button>}
-      {pairError && <p className="health-warning">! {pairError}</p>}
-      <div className="toggle-row">
-        <span><b>Rotate access token</b><small>Invalidate the current token and mint a new one.</small></span>
-      </div>
-      <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
-      {regenMessage && <p className={regenMessage === "Token regenerated" ? "good" : "health-warning"}>{regenMessage === "Token regenerated" ? regenMessage : `! ${regenMessage}`}</p>}
-    </aside></div>
+        <button onClick={updateBlocklists} disabled={blocklistBusy} style={{ marginTop: "14px" }}>
+          {blocklistBusy ? "Updating…" : "Update blocklists"}
+        </button>
+      </aside>
+      <aside className="card system-card">
+        <p className="eyebrow">THREAT INTEL</p>
+        <h2>CISA KEV Catalog</h2>
+        <p className="subtle">Search the Known Exploited Vulnerabilities catalog.</p>
+        <form onSubmit={searchCisa} style={{ display: "flex", gap: "10px", marginTop: "14px", marginBottom: "14px" }}>
+          <input type="text" value={cisaQuery} onChange={(e) => setCisaQuery(e.target.value)} placeholder="Search vendor, product, or CVE..." style={{ flex: 1, padding: "8px", background: "#071511", border: "1px solid var(--line)", borderRadius: "7px", color: "var(--text)" }} />
+          <button type="submit" disabled={cisaBusy} style={{ padding: "8px 12px" }}>{cisaBusy ? "..." : "Search"}</button>
+        </form>
+        {cisaResults && (
+          <div style={{ maxHeight: "200px", overflowY: "auto", background: "#0a1915", border: "1px solid var(--line)", borderRadius: "7px", padding: "10px" }}>
+            {cisaResults.length === 0 ? <p className="subtle">No results found.</p> : cisaResults.map(r => (
+              <div key={r.cve_id} style={{ borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
+                <strong style={{ color: "var(--amber)", fontSize: "11px" }}>{r.cve_id}</strong>
+                <p style={{ margin: "4px 0", fontSize: "10px" }}>{r.vendor_project} {r.product}</p>
+                <small style={{ color: "var(--muted)", fontSize: "9px" }}>{r.vulnerability_name}</small>
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={updateCisa} disabled={cisaUpdateBusy} style={{ marginTop: "14px", width: "100%" }}>
+          {cisaUpdateBusy ? "Updating…" : "Update Catalog"}
+        </button>
+        {cisaMsg && <p className={cisaMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{cisaMsg}</p>}
+      </aside>
+      <aside className="card system-card pairing-card">
+        <p className="eyebrow">DEVICE PAIRING</p>
+        <h2>Pair a mobile device</h2>
+        <p className="subtle">Generate a one-time code to link a phone or tablet to this appliance.</p>
+        {pairing
+          ? <div className="pairing-code-block"><strong className="pairing-code">{pairing.code}</strong><small>Expires in {pairRemaining}s</small></div>
+          : <button onClick={startPairing} disabled={pairBusy}>{pairBusy ? "Generating…" : "Generate pairing code"}</button>}
+        {pairError && <p className="health-warning">! {pairError}</p>}
+        <div className="toggle-row">
+          <span><b>Rotate access token</b><small>Invalidate the current token and mint a new one.</small></span>
+        </div>
+        <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
+        {regenMessage && <p className={regenMessage === "Token regenerated" ? "good" : "health-warning"}>{regenMessage === "Token regenerated" ? regenMessage : `! ${regenMessage}`}</p>}
+      </aside>
+    </div>
   </section>;
 }
 
@@ -486,6 +517,7 @@ export default function App() {
         {page === "Traffic" && <Traffic traffic={data.traffic || {}}/>}
         {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve}/>}
         {page === "Settings" && <Settings/>}
+        {page === "Advanced" && <Advanced/>}
       </div>
     </main>
     <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }}/>
