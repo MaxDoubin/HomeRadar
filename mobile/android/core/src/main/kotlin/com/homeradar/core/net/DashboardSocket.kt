@@ -35,6 +35,15 @@ fun nextBackoffMillis(previousMillis: Long): Long {
 }
 
 /**
+ * Pure URL builder for the dashboard websocket, split out from [DashboardSocket]
+ * so the "token goes in the query string, not a header" contract (the backend's
+ * websocket upgrade can't read custom headers the way a REST call can) is
+ * directly unit-testable without a real socket.
+ */
+fun buildWsUrl(baseUrl: String, path: String = "/ws", token: String? = null): String =
+    baseUrl.trimEnd('/') + path + (token?.let { "?token=$it" } ?: "")
+
+/**
  * Listens to the HomeRadar dashboard websocket and decodes each text frame as
  * a [SnapshotMessage], publishing the latest one via [snapshots]. Consumers
  * (e.g. a ViewModel-style wrapper in the `:app` module, added later) collect
@@ -54,11 +63,9 @@ class DashboardSocket(
 
     private var webSocket: WebSocket? = null
 
-    fun connect(path: String = "/ws/dashboard") {
-        val wsUrl = baseUrl.trimEnd('/') + path
-        val requestBuilder = Request.Builder().url(wsUrl)
-        tokenProvider.currentToken()?.let { requestBuilder.header(AUTH_HEADER_NAME, it) }
-        webSocket = httpClient.newWebSocket(requestBuilder.build(), this)
+    fun connect(path: String = "/ws") {
+        val wsUrl = buildWsUrl(baseUrl, path, tokenProvider.currentToken())
+        webSocket = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), this)
     }
 
     fun close() {

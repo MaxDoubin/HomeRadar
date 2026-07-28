@@ -2,6 +2,7 @@ package com.homeradar.core
 
 import com.homeradar.core.net.INITIAL_BACKOFF_MILLIS
 import com.homeradar.core.net.MAX_BACKOFF_MILLIS
+import com.homeradar.core.net.buildWsUrl
 import com.homeradar.core.net.nextBackoffMillis
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -55,5 +56,21 @@ class DashboardSocketReconnectTest {
 
         val restarted = nextBackoffMillis(0L)
         assertEquals(2_500L, restarted)
+    }
+
+    @Test
+    fun `ws url defaults to the real backend path and puts the token in the query string`() {
+        // Regression guard: the backend's websocket only reads a `?token=`
+        // query parameter (it can't check custom headers on the upgrade
+        // request the way REST calls can), and its real route is `/ws`.
+        assertEquals("http://host:8000/ws", buildWsUrl("http://host:8000"))
+        assertEquals(
+            "http://host:8000/ws?token=abc123",
+            buildWsUrl("http://host:8000", token = "abc123"),
+        )
+        assertEquals(
+            "http://host:8000/ws",
+            buildWsUrl("http://host:8000/", token = null),
+        )
     }
 }
