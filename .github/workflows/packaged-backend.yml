@@ -21,15 +21,19 @@ jobs:
         include:
           - os: windows-latest
             label: Windows x64
+            target: windows
             executable: dist/homeradar-backend.exe
           - os: ubuntu-latest
             label: Linux x64
+            target: linux
             executable: dist/homeradar-backend
           - os: macos-15-intel
             label: macOS Intel
+            target: mac-intel
             executable: dist/homeradar-backend
           - os: macos-15
             label: macOS Apple Silicon
+            target: mac-arm
             executable: dist/homeradar-backend
     runs-on: ${{ matrix.os }}
     defaults:
@@ -50,10 +54,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt pyinstaller
-          SEP="$(python -c 'import os; print(os.pathsep)')"
-          python -m PyInstaller --clean --noconfirm --name homeradar-backend --onefile \
-            --add-data "backend/db/schema.sql${SEP}backend/db" \
-            backend/main.py
+          python -m PyInstaller --clean --noconfirm --name homeradar-backend --onefile --add-data "backend/db/schema.sql:backend/db" backend/main.py
 
       - name: Launch frozen backend and verify health
-        run: python scripts/smoke_packaged_backend.py "${{ matrix.executable }}"
+        run: |
+          set -o pipefail
+          python scripts/smoke_packaged_backend.py "${{ matrix.executable }}" 2>&1 | tee "packaged-backend-${{ matrix.target }}.log"
+
+      - name: Preserve packaged backend log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-backend-log-${{ matrix.target }}
+          path: packaged-backend-${{ matrix.target }}.log
+          if-no-files-found: warn
+          retention-days: 7
