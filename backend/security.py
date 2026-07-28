@@ -36,6 +36,7 @@ _PROTECTED_PREFIXES = (
     "/backups",
     "/digest",
     "/scan",
+    "/setup",
     "/pair",
 )
 
@@ -59,8 +60,10 @@ def extract_presented_token(
 ) -> str | None:
     token = headers.get("x-homeradar-token")
     authorization = headers.get("authorization", "")
-    if not token and authorization.startswith("Bearer "):
-        token = authorization.removeprefix("Bearer ").strip()
+    if not token and authorization:
+        scheme, separator, value = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer":
+            token = value.strip()
     if not token and cookies:
         token = cookies.get("homeradar_token")
     return token or None
@@ -73,14 +76,17 @@ def path_requires_auth(path: str) -> bool:
 
 
 def authorization_decision(path: str, *, local: bool, token_valid: bool) -> tuple[bool, int]:
-    """Return ``(allowed, failure_status)`` for one request path."""
+    """Return ``(allowed, response_status)`` for one request path."""
     if not path_requires_auth(path):
         return True, 200
     if path in _LOCAL_ONLY_PATHS:
-        return (local, 403)
+        allowed = local
+        return allowed, 200 if allowed else 403
     if path in _BOOTSTRAP_PATHS:
-        return (local or token_valid, 403)
-    return (local or token_valid, 401)
+        allowed = local or token_valid
+        return allowed, 200 if allowed else 403
+    allowed = local or token_valid
+    return allowed, 200 if allowed else 401
 
 
 def _apply_security_headers(response: Response) -> Response:
