@@ -15,7 +15,10 @@ discovery with a local DNS firewall, community blocklists, optional reputation f
 behavior-based trust scoring, real-time alerts, weekly digests, and a responsive React
 dashboard. Per-device internet pauses, quiet-hour schedules, custom domain rules, and
 non-invasive service-exposure findings add family controls without attempting passwords
-or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included.
+or exploit probes. Docker, systemd, kiosk, and Debian live-ISO build paths are included,
+as well as native iOS (SwiftUI) and Android (Kotlin) companion apps for mobile push notifications.
+
+Experimental ML-based anomaly detection using scikit-learn is now included, as well as an active deauth defense mechanism.
 
 It remains development software until it completes real-network, old-hardware, DNS
 failover, and week-long reliability testing.
@@ -42,6 +45,7 @@ python3 -m venv .venv
 ```
 
 For frontend development, run `npm install && npm run dev` in `frontend/`.
+To run frontend tests, run `npm run test` in `frontend/`.
 
 ## How it works
 
@@ -66,6 +70,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 See [docs/DEVICE_FINGERPRINTING.md](docs/DEVICE_FINGERPRINTING.md) for the signal model.
 See [docs/SECURITY_PIPELINE.md](docs/SECURITY_PIPELINE.md) for DNS, intelligence, and trust scoring.
 See [docs/OPEN_SOURCE_INSPIRATION.md](docs/OPEN_SOURCE_INSPIRATION.md) for cited prior art.
+See [docs/OLD_LAPTOP_GUIDE.md](docs/OLD_LAPTOP_GUIDE.md) for a guide on repurposing an old laptop to run Home Radar.
 
 ## Contributing
 

@@ -37,6 +37,11 @@ describe("getStoredToken / setStoredToken", () => {
   });
 });
 
+vi.mock("./demo", () => ({
+  handleDemoApi: vi.fn(),
+  demoDashboardSocket: vi.fn(),
+}));
+
 describe("api()", () => {
   beforeEach(() => {
     setStoredToken("api-token");
@@ -102,6 +107,26 @@ describe("api()", () => {
     const [, options] = fetch.mock.calls[0];
     expect(options.method).toBe("PATCH");
     expect(options.body).toBe(body);
+  });
+});
+
+describe("api() with VITE_DEMO_MODE", () => {
+  let originalEnv;
+  beforeEach(() => {
+    originalEnv = import.meta.env.VITE_DEMO_MODE;
+    import.meta.env.VITE_DEMO_MODE = "true";
+  });
+  afterEach(() => {
+    import.meta.env.VITE_DEMO_MODE = originalEnv;
+    vi.clearAllMocks();
+  });
+
+  it("delegates to handleDemoApi", async () => {
+    const { handleDemoApi } = await import("./demo");
+    handleDemoApi.mockResolvedValue({ hello: "demo" });
+    const result = await api("/dashboard", { method: "POST" });
+    expect(handleDemoApi).toHaveBeenCalledWith("/dashboard", { method: "POST" });
+    expect(result).toEqual({ hello: "demo" });
   });
 });
 
@@ -222,5 +247,27 @@ describe("dashboardSocket()", () => {
     const socket = dashboardSocket(onSnapshot);
     socket.onmessage({ data: JSON.stringify({ type: "something_else" }) });
     expect(onSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("dashboardSocket() with VITE_DEMO_MODE", () => {
+  let originalEnv;
+  beforeEach(() => {
+    originalEnv = import.meta.env.VITE_DEMO_MODE;
+    import.meta.env.VITE_DEMO_MODE = "true";
+  });
+  afterEach(() => {
+    import.meta.env.VITE_DEMO_MODE = originalEnv;
+    vi.clearAllMocks();
+  });
+
+  it("delegates to demoDashboardSocket", async () => {
+    const { demoDashboardSocket } = await import("./demo");
+    const mockSocket = { close: vi.fn() };
+    demoDashboardSocket.mockReturnValue(mockSocket);
+    const onSnapshot = vi.fn();
+    const socket = dashboardSocket(onSnapshot);
+    expect(demoDashboardSocket).toHaveBeenCalledWith(onSnapshot);
+    expect(socket).toBe(mockSocket);
   });
 });

@@ -43,10 +43,11 @@ the local blocklist, forwarded or denied, stored in `traffic_logs`, and reflecte
 alerts and trust scores. Passive flow observations can supplement DNS metadata when the
 network exposes those packets. Reputation checks are cached.
 
-The React dashboard consumes a single `/dashboard` snapshot plus `/ws` updates. Device
-authorization, alert resolution, traffic summaries, trust explanations, settings,
-blocklist updates, CISA KEV search, digest preview/send, and manual scans are API
-operations. A standalone kiosk view polls the lightweight status endpoint.
+The React dashboard and mobile companion apps (native iOS and Android) consume a single
+`/dashboard` snapshot plus `/ws` updates. Device authorization, alert resolution, traffic
+summaries, trust explanations, settings, blocklist updates, CISA KEV search, digest
+preview/send, and manual scans are API operations. A standalone kiosk view polls the
+lightweight status endpoint.
 
 ## Data model
 
