@@ -55,15 +55,35 @@ jobs:
       - id: ruff
         name: Ruff correctness checks
         continue-on-error: true
-        run: ruff check backend scripts tests --select E9,F63,F7,F82,B --ignore B008
+        shell: bash
+        run: |
+          set -o pipefail
+          ruff check backend scripts tests --select E9,F63,F7,F82,B --ignore B008 2>&1 | tee ruff.log
       - id: mypy
         name: Mypy type analysis
         continue-on-error: true
-        run: mypy backend --ignore-missing-imports --check-untyped-defs --no-error-summary
+        shell: bash
+        run: |
+          set -o pipefail
+          mypy backend --ignore-missing-imports --check-untyped-defs --no-error-summary 2>&1 | tee mypy.log
       - id: bandit
         name: Bandit security analysis
         continue-on-error: true
-        run: bandit -q -r backend -x tests -ll
+        shell: bash
+        run: |
+          set -o pipefail
+          bandit -q -r backend -x tests -ll 2>&1 | tee bandit.log
+      - name: Preserve Python static-analysis logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-static-analysis
+          path: |
+            ruff.log
+            mypy.log
+            bandit.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Enforce static-analysis results
         env:
           RUFF: ${{ steps.ruff.outcome }}
@@ -86,27 +106,46 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - id: python-audit
+      - id: python_audit
         name: Audit Python dependencies
         continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           python -m pip install --upgrade pip pip-audit
-          python -m pip_audit -r backend/requirements.txt --strict
-      - id: frontend-audit
+          python -m pip_audit -r backend/requirements.txt --strict 2>&1 | tee python-audit.log
+      - id: frontend_audit
         name: Audit frontend dependencies
         continue-on-error: true
         working-directory: frontend
-        run: npm audit --audit-level=high
-      - id: desktop-audit
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee ../frontend-audit.log
+      - id: desktop_audit
         name: Audit desktop dependencies
         continue-on-error: true
         working-directory: desktop
-        run: npm audit --audit-level=high
+        shell: bash
+        run: |
+          set -o pipefail
+          npm audit --audit-level=high 2>&1 | tee ../desktop-audit.log
+      - name: Preserve dependency-audit logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: |
+            python-audit.log
+            frontend-audit.log
+            desktop-audit.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Enforce dependency-audit results
         env:
-          PYTHON_AUDIT: ${{ steps.python-audit.outcome }}
-          FRONTEND_AUDIT: ${{ steps.frontend-audit.outcome }}
-          DESKTOP_AUDIT: ${{ steps.desktop-audit.outcome }}
+          PYTHON_AUDIT: ${{ steps.python_audit.outcome }}
+          FRONTEND_AUDIT: ${{ steps.frontend_audit.outcome }}
+          DESKTOP_AUDIT: ${{ steps.desktop_audit.outcome }}
         run: |
           printf 'python=%s\nfrontend=%s\ndesktop=%s\n' "$PYTHON_AUDIT" "$FRONTEND_AUDIT" "$DESKTOP_AUDIT"
           test "$PYTHON_AUDIT" = success
@@ -143,7 +182,18 @@ jobs:
       - name: Install ESLint audit dependencies
         run: npm install --no-save eslint@9 @eslint/js globals
       - name: Lint frontend and desktop JavaScript
-        run: npx eslint frontend/src desktop/main.js --max-warnings=0
+        shell: bash
+        run: |
+          set -o pipefail
+          npx eslint frontend/src desktop/main.js --max-warnings=0 2>&1 | tee eslint.log
+      - name: Preserve ESLint log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eslint-audit
+          path: eslint.log
+          if-no-files-found: error
+          retention-days: 7
 
   android:
     name: Android tests, lint, and build
@@ -227,21 +277,44 @@ jobs:
       - id: shellcheck
         name: Check shell scripts
         continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
           mapfile -d '' files < <(find . -type f -name '*.sh' -not -path './.git/*' -print0)
-          if ((${#files[@]})); then shellcheck "${files[@]}"; fi
+          if ((${#files[@]})); then shellcheck "${files[@]}"; fi 2>&1 | tee shellcheck.log
       - id: actionlint
         name: Validate GitHub Actions workflows
         continue-on-error: true
-        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest 2>&1 | tee actionlint.log
       - id: hadolint
         name: Lint Dockerfile
         continue-on-error: true
-        run: docker run --rm -i hadolint/hadolint:latest < docker/Dockerfile
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm -i hadolint/hadolint:latest < docker/Dockerfile 2>&1 | tee hadolint.log
       - id: gitleaks
         name: Scan repository history for committed secrets
         continue-on-error: true
-        run: docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest detect --source . --no-banner --redact
+        shell: bash
+        run: |
+          set -o pipefail
+          docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest detect --source . --no-banner --redact 2>&1 | tee gitleaks.log
+      - name: Preserve repository-hygiene logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repository-hygiene
+          path: |
+            shellcheck.log
+            actionlint.log
+            hadolint.log
+            gitleaks.log
+          if-no-files-found: error
+          retention-days: 7
       - name: Enforce repository-hygiene results
         env:
           SHELLCHECK: ${{ steps.shellcheck.outcome }}
