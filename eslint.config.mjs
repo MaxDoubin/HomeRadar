@@ -1,11 +1,12 @@
 import js from "@eslint/js";
 import globals from "globals";
+import react from "eslint-plugin-react";
 
 const unusedVars = [
   "error",
   {
     argsIgnorePattern: "^_",
-    caughtErrorsIgnorePattern: "^_",
+    caughtErrors: "none",
     varsIgnorePattern: "^_",
   },
 ];
@@ -23,6 +24,7 @@ export default [
   {
     files: ["frontend/src/**/*.{js,jsx}"],
     ...js.configs.recommended,
+    plugins: { react },
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
@@ -37,6 +39,7 @@ export default [
     rules: {
       ...js.configs.recommended.rules,
       "no-unused-vars": unusedVars,
+      "react/jsx-uses-vars": "error",
     },
   },
   {
