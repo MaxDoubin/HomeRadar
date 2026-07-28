@@ -31,12 +31,16 @@ def create_backup(
             target, timeout=30
         ) as destination:
             source.backup(destination)
-            placeholders = ",".join("?" for _ in _SECRET_SETTING_KEYS)
-            destination.execute(
-                f"DELETE FROM settings WHERE key IN ({placeholders})",
-                _SECRET_SETTING_KEYS,
-            )
-            destination.commit()
+            settings_exists = destination.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+            ).fetchone()
+            if settings_exists:
+                placeholders = ",".join("?" for _ in _SECRET_SETTING_KEYS)
+                destination.execute(
+                    f"DELETE FROM settings WHERE key IN ({placeholders})",
+                    _SECRET_SETTING_KEYS,
+                )
+                destination.commit()
             check = destination.execute("PRAGMA quick_check").fetchone()[0]
     except Exception:
         target.unlink(missing_ok=True)
