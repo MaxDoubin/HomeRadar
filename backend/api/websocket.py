@@ -1,4 +1,4 @@
-"""Real-time dashboard snapshots over WebSocket."""
+"""Authenticated real-time dashboard snapshots over WebSocket."""
 from __future__ import annotations
 
 import asyncio
@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.db import get_conn, models
 from backend.monitor.trust_scoring import household_score
 from backend.pairing import verify_token
+from backend.security import is_local_host
 
 router = APIRouter()
 
@@ -31,15 +32,30 @@ def dashboard_snapshot() -> dict:
     }
 
 
+def _websocket_token(websocket: WebSocket) -> str | None:
+    token = websocket.query_params.get("token")
+    if not token:
+        token = websocket.headers.get("x-homeradar-token")
+    authorization = websocket.headers.get("authorization", "")
+    if not token and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+    if not token:
+        token = websocket.cookies.get("homeradar_token")
+    return token or None
+
+
 @router.websocket("/ws")
 async def dashboard_websocket(websocket: WebSocket):
-    token = websocket.query_params.get("token")
+    local = is_local_host(websocket.client.host if websocket.client else None)
+    token = _websocket_token(websocket)
+    token_valid = False
     if token:
         with get_conn() as conn:
             token_valid = verify_token(conn, token)
-        if not token_valid:
-            await websocket.close(code=4401)
-            return
+    if not local and not token_valid:
+        await websocket.close(code=4401, reason="Pairing token required")
+        return
+
     await websocket.accept()
     try:
         while True:
