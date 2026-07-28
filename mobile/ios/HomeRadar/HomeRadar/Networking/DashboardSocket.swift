@@ -1,17 +1,6 @@
 import Foundation
 
 /// Pure backoff schedule for websocket reconnect attempts.
-///
-/// Progression: 2.5s -> 5s -> 10s -> capped at 15s, resetting to 2.5s after
-/// any successful snapshot. `previous <= 0` is treated as "no attempt yet"
-/// and returns the base 2.5s delay.
-///
-/// This is deliberately more aggressive than the web dashboard's flat retry
-/// interval -- not a bug. Mobile networks (switching Wi-Fi/cellular,
-/// backgrounding, walking out of range of the LAN appliance) drop far more
-/// often than a wired browser session, so a capped exponential backoff
-/// recovers quickly from the common case (a brief blip) while still not
-/// hammering the appliance during a prolonged outage.
 func nextBackoffInterval(previous: TimeInterval) -> TimeInterval {
     let base: TimeInterval = 2.5
     let cap: TimeInterval = 15
@@ -19,21 +8,15 @@ func nextBackoffInterval(previous: TimeInterval) -> TimeInterval {
     return min(previous * 2, cap)
 }
 
-/// Coarse connection state for UI (e.g. a "Live"/"Connecting"/"Disconnected"
-/// indicator on the Overview screen).
 enum DashboardSocketState: Equatable {
     case disconnected
     case connecting
     case connected
 }
 
-/// Maintains a persistent connection to `GET /ws`, decoding each pushed
-/// `snapshot` text frame and forwarding it via `onSnapshot`.
-///
-/// The server never pings, never explicitly closes, and needs no message
-/// from the client to keep pushing -- so noticing a dropped connection and
-/// reconnecting (with backoff, see `nextBackoffInterval`) is entirely this
-/// class's job.
+/// Maintains an authenticated dashboard WebSocket and reconnects with capped
+/// exponential backoff. Credentials are sent in the upgrade request header,
+/// never in the URL.
 final class DashboardSocket {
     var onSnapshot: ((SnapshotMessage) -> Void)?
     var onStateChange: ((DashboardSocketState) -> Void)?
@@ -53,9 +36,6 @@ final class DashboardSocket {
         self.session = session
     }
 
-    /// Starts (or restarts) the connect/reconnect loop. Safe to call again
-    /// after `stop()`, e.g. when the app returns to the foreground. A no-op
-    /// if already running.
     func start() {
         guard isStopped else { return }
         isStopped = false
@@ -63,8 +43,6 @@ final class DashboardSocket {
         connectOnce()
     }
 
-    /// Tears down the socket and cancels any pending reconnect attempt.
-    /// Call this when the app backgrounds (`scenePhase == .background`).
     func stop() {
         isStopped = true
         retryTask?.cancel()
@@ -80,8 +58,10 @@ final class DashboardSocket {
         guard !isStopped else { return }
         onStateChange?(.connecting)
         do {
-            let url = try client.webSocketURL()
-            let newTask = session.webSocketTask(with: url)
+            var request = URLRequest(url: try client.webSocketURL())
+            request.timeoutInterval = 15
+            client.attachAuth(&request)
+            let newTask = session.webSocketTask(with: request)
             task = newTask
             newTask.resume()
             listen(on: newTask)
@@ -118,25 +98,22 @@ final class DashboardSocket {
             data = nil
         }
         guard let data, let snapshot = try? Self.decoder.decode(SnapshotMessage.self, from: data) else {
-            // Malformed/unrecognized frame: ignore it, keep listening. Don't
-            // tear down the connection over one bad frame.
             return
         }
-        // A successfully parsed snapshot is this class's definition of a
-        // "successful" connection for backoff-reset purposes.
         currentBackoff = 0
         onStateChange?(.connected)
         onSnapshot?(snapshot)
     }
 
     private func scheduleRetry() {
-        guard !isStopped else { return }
+        guard !isStopped, retryTask == nil else { return }
         task = nil
         let wait = nextBackoffInterval(previous: currentBackoff)
         currentBackoff = wait
         retryTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
             guard let self, !Task.isCancelled, !self.isStopped else { return }
+            self.retryTask = nil
             self.connectOnce()
         }
     }
