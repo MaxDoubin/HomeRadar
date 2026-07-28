@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from backend import config
 
 logger = logging.getLogger("homeradar.threat_intel")
+_ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,14 @@ def _store(conn, reputation: Reputation) -> None:
     )
 
 
+def _abuseipdb_url(ip: str) -> str:
+    endpoint = urllib.parse.urlsplit(_ABUSEIPDB_ENDPOINT)
+    if endpoint.scheme != "https" or endpoint.hostname != "api.abuseipdb.com":
+        raise RuntimeError("invalid AbuseIPDB endpoint configuration")
+    query = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": 90, "verbose": ""})
+    return f"{_ABUSEIPDB_ENDPOINT}?{query}"
+
+
 def check_ip(conn, ip: str) -> Reputation:
     """Check a public IP. Without an API key, return a transparent neutral result."""
     if not _is_public_ip(ip):
@@ -99,17 +108,16 @@ def check_ip(conn, ip: str) -> Reputation:
     if not config.ABUSEIPDB_API_KEY:
         return Reputation(ip, "ip", False, 0, source, "API key not configured")
 
-    query = urllib.parse.urlencode({"ipAddress": ip, "maxAgeInDays": 90, "verbose": ""})
     request = urllib.request.Request(
-        f"https://api.abuseipdb.com/api/v2/check?{query}",
+        _abuseipdb_url(ip),
         headers={
             "Accept": "application/json",
             "Key": config.ABUSEIPDB_API_KEY,
-            "User-Agent": "HomeRadar/0.2",
+            "User-Agent": "HomeRadar/0.3",
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310: fixed HTTPS host
             data = json.load(response)["data"]
         confidence = int(data.get("abuseConfidenceScore", 0))
         detail = (
