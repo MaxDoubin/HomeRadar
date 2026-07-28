@@ -107,10 +107,10 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_blocklist_loop()),
         asyncio.create_task(_maintenance_loop()),
     ]
-    dns_proxy = None
-    dns_thread = None
-    traffic_monitor = None
-    traffic_thread = None
+    dns_proxy: DNSProxy | None = None
+    dns_thread: threading.Thread | None = None
+    traffic_monitor: PassiveTrafficMonitor | None = None
+    traffic_thread: threading.Thread | None = None
     if config.DNS_ENABLED:
         dns_proxy = DNSProxy(blocklists)
         services.dns_proxy = dns_proxy

@@ -117,14 +117,10 @@ def redeem_pairing_code(conn, presented_code: str) -> str | None:
         return None
     code = models.get_setting(conn, _CODE_KEY)
     expires_at = _parse_iso(models.get_setting(conn, _CODE_EXPIRES_KEY))
-    valid = (
-        bool(code)
-        and expires_at is not None
-        and _now() < expires_at
-        and bool(presented_code)
-        and hmac.compare_digest(presented_code, code)
-    )
-    if not valid:
+    if not code or expires_at is None or _now() >= expires_at or not presented_code:
+        _register_failure(conn)
+        return None
+    if not hmac.compare_digest(presented_code, code):
         _register_failure(conn)
         return None
     models.set_settings(conn, {_CODE_KEY: "", _CODE_EXPIRES_KEY: ""})

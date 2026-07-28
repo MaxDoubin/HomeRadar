@@ -148,7 +148,7 @@ def upsert_device(
 def _device_dict(row) -> dict:
     device = dict(row)
     for field in _JSON_DEVICE_FIELDS:
-        default = {} if field == "fingerprint" else []
+        default: dict | list = {} if field == "fingerprint" else []
         try:
             device[field] = json.loads(device.get(field) or json.dumps(default))
         except (TypeError, json.JSONDecodeError):
