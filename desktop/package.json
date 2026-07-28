@@ -1,53 +1,81 @@
 {
   "name": "homeradar-desktop",
   "version": "1.0.0",
-  "description": "Home Radar Desktop App",
+  "description": "Home Radar local network security dashboard",
   "main": "main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\"",
-    "build": "electron-builder --publish always"
+    "test": "node --check main.js",
+    "build": "electron-builder --publish never",
+    "release": "electron-builder --publish always"
   },
-  "author": "",
+  "author": "Max Doubin",
   "license": "MIT",
+  "homepage": "https://github.com/MaxDoubin/HomeRadar",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MaxDoubin/HomeRadar.git"
+  },
   "devDependencies": {
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3"
   },
+  "dependencies": {
+    "wait-on": "^9.1.0"
+  },
   "build": {
-    "appId": "com.homeradar.desktop",
+    "appId": "com.maxdoubin.homeradar",
     "productName": "Home Radar",
+    "asar": true,
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "main.js",
+      "error.html",
+      "package.json"
+    ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "linux": {
       "target": [
         "AppImage",
         "deb"
       ],
-      "category": "Utility"
+      "category": "Utility",
+      "synopsis": "Local home network security dashboard"
     },
     "extraResources": [
       {
         "from": "resources",
         "to": ".",
-        "filter": [
-          "**/*"
-        ]
+        "filter": ["**/*"]
       }
     ],
     "publish": [
-      "github"
+      {
+        "provider": "github",
+        "owner": "MaxDoubin",
+        "repo": "HomeRadar",
+        "releaseType": "release"
+      }
     ]
-  },
-  "dependencies": {
-    "wait-on": "^9.1.0"
-  },
-  "repository": "github:homeradar/homeradar"
+  }
 }
