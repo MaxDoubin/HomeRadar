@@ -241,9 +241,10 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Download all application artifacts
+      - name: Download application artifacts only
         uses: actions/download-artifact@v4
         with:
+          pattern: home-radar-*
           path: release
           merge-multiple: true
 
