@@ -51,6 +51,7 @@ def scan(subnet: str | None = None, timeout: float = 3.0) -> list[dict]:
     """
     try:
         from scapy.all import ARP, Ether, srp
+        from scapy.error import Scapy_Exception
     except ImportError:
         logger.error("scapy is not installed; ARP scanning is unavailable")
         return []
@@ -81,11 +82,15 @@ def scan(subnet: str | None = None, timeout: float = 3.0) -> list[dict]:
 
     try:
         answered, _ = srp(packet, timeout=timeout, verbose=False)
-    except PermissionError:
-        logger.error("ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback")
+    except (PermissionError, Scapy_Exception) as exc:
+        message = str(exc).lower()
+        if "permission" in message or "/dev/bpf" in message or "root" in message:
+            logger.info("Raw ARP discovery is unavailable without elevated packet access; using neighbor cache fallback")
+            return []
+        logger.warning("ARP scan failed: %s", exc)
         return []
-    except OSError:
-        logger.exception("ARP scan failed")
+    except OSError as exc:
+        logger.warning("ARP scan failed: %s", exc)
         return []
 
     devices = {}
