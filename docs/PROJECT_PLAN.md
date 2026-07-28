@@ -50,12 +50,12 @@ flash, plug in, protected.
 
 ### Stretch Features (Post-MVP / 2.0 Story for Application)
 
-- ML anomaly detection (Isolation Forest or Autoencoder) on traffic patterns to catch
+- [x] ML anomaly detection (Isolation Forest or Autoencoder) on traffic patterns to catch
   zero-day-style behavior without signature matching
 - [x] Per-device DNS internet pause, quiet-hour schedules, and custom domain rules
 - Bandwidth usage monitoring per device
 - [x] Non-invasive service exposure audit from observed ports (no credential attempts)
-- Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
+- [x] Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
   detection)
 - [x] Mobile companion apps (native iOS/SwiftUI and Android/Kotlin) for push notifications
 - Auto-update mechanism for blocklists and threat intel
