@@ -1,0 +1,16 @@
+INFO:     Started server process [81707]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+ERROR:homeradar.arp_scanner:ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback
+INFO:homeradar.scan_runner:Discovery found 1 host(s): ARP=0 neighbor=1 mDNS=0 SSDP=0
+ERROR:homeradar.arp_scanner:ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback
+INFO:homeradar.scan_runner:Discovery found 1 host(s): ARP=0 neighbor=1 mDNS=0 SSDP=0
+ERROR:homeradar.arp_scanner:ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback
+INFO:homeradar.scan_runner:Discovery found 1 host(s): ARP=0 neighbor=1 mDNS=0 SSDP=0
+ERROR:homeradar.arp_scanner:ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback
+INFO:homeradar.scan_runner:Discovery found 1 host(s): ARP=0 neighbor=1 mDNS=0 SSDP=0
+INFO:     127.0.0.1:38534 - "GET /api/digest/preview HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39004 - "GET /digest/preview HTTP/1.1" 200 OK
+ERROR:homeradar.arp_scanner:ARP scan requires root/CAP_NET_RAW privileges; using neighbor cache fallback
+INFO:homeradar.scan_runner:Discovery found 1 host(s): ARP=0 neighbor=1 mDNS=0 SSDP=0

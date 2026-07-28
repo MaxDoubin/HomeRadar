@@ -241,11 +241,80 @@ function Settings() {
   const [regenMessage, setRegenMessage] = useState("");
   const [regenBusy, setRegenBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [blocklists, setBlocklists] = useState(null);
+  const [blocklistBusy, setBlocklistBusy] = useState(false);
+  const [digestPreview, setDigestPreview] = useState(null);
+  const [digestBusy, setDigestBusy] = useState(false);
+  const [digestSentMsg, setDigestSentMsg] = useState("");
+  const [cisaQuery, setCisaQuery] = useState("");
+  const [cisaResults, setCisaResults] = useState(null);
+  const [cisaBusy, setCisaBusy] = useState(false);
+  const [cisaUpdateBusy, setCisaUpdateBusy] = useState(false);
+  const [cisaMsg, setCisaMsg] = useState("");
   const refreshSystem = () => {
     api("/health").then(setHealth);
     api("/backups").then((result)=>setBackups(result.backups));
+    api("/blocklists").then(setBlocklists);
   };
   useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
+
+  const updateBlocklists = async () => {
+    setBlocklistBusy(true);
+    try {
+      const result = await api("/blocklists/update", { method: "POST" });
+      setBlocklists(result);
+    } finally {
+      setBlocklistBusy(false);
+    }
+  };
+
+  const loadDigestPreview = async () => {
+    try {
+      const result = await api("/digest/preview");
+      setDigestPreview(result);
+    } catch (e) {
+      setDigestPreview({ subject: "Error", body: e.message });
+    }
+  };
+
+  const sendDigest = async () => {
+    setDigestBusy(true);
+    setDigestSentMsg("");
+    try {
+      await api("/digest/send", { method: "POST" });
+      setDigestSentMsg("Digest sent successfully!");
+    } catch (e) {
+      setDigestSentMsg("Error: " + e.message);
+    } finally {
+      setDigestBusy(false);
+    }
+  };
+
+  const searchCisa = async (e) => {
+    e.preventDefault();
+    setCisaBusy(true);
+    try {
+      const results = await api(`/threat-intel/cisa-kev?query=${encodeURIComponent(cisaQuery)}`);
+      setCisaResults(results);
+    } catch (err) {
+      setCisaResults([]);
+    } finally {
+      setCisaBusy(false);
+    }
+  };
+
+  const updateCisa = async () => {
+    setCisaUpdateBusy(true);
+    setCisaMsg("");
+    try {
+      const result = await api("/threat-intel/cisa-kev/update", { method: "POST" });
+      setCisaMsg(`Updated ${result.records} records from ${result.source}`);
+    } catch (err) {
+      setCisaMsg(`Error: ${err.message}`);
+    } finally {
+      setCisaUpdateBusy(false);
+    }
+  };
   useEffect(() => {
     if (!pairing) return;
     const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -298,6 +367,59 @@ function Settings() {
       {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
       <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
       {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
+    </aside>
+    <aside className="card system-card">
+      <p className="eyebrow">THREAT INTEL</p>
+      <h2>Blocklists</h2>
+      <p className="subtle">Ad and malware domains currently blocked.</p>
+      <div className="system-metrics">
+        <p><span>DOMAINS</span><b>{blocklists?.domain_count?.toLocaleString() || "0"}</b></p>
+        <p><span>SOURCES</span><b>{blocklists?.sources?.length || "0"}</b></p>
+      </div>
+      <button onClick={updateBlocklists} disabled={blocklistBusy} style={{ marginTop: "14px" }}>
+        {blocklistBusy ? "Updating…" : "Update blocklists"}
+      </button>
+    </aside>
+    <aside className="card system-card">
+      <p className="eyebrow">COMMUNICATION</p>
+      <h2>Weekly Digest</h2>
+      <p className="subtle">Preview or manually send the security digest.</p>
+      {digestPreview ? (
+        <div style={{ marginTop: "10px", padding: "10px", background: "#0a1915", borderRadius: "7px", border: "1px solid var(--line)" }}>
+          <strong style={{ display: "block", marginBottom: "5px", fontSize: "10px" }}>Subject: {digestPreview.subject}</strong>
+          <pre style={{ margin: 0, fontSize: "9px", whiteSpace: "pre-wrap", color: "var(--muted)" }}>{digestPreview.body}</pre>
+        </div>
+      ) : (
+        <button onClick={loadDigestPreview} style={{ marginTop: "14px" }}>Preview Digest</button>
+      )}
+      <button onClick={sendDigest} disabled={digestBusy} style={{ marginTop: "14px", background: "var(--green)", color: "#062016" }}>
+        {digestBusy ? "Sending…" : "Send Digest Now"}
+      </button>
+      {digestSentMsg && <p className={digestSentMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{digestSentMsg}</p>}
+    </aside>
+    <aside className="card system-card pairing-card">
+      <p className="eyebrow">THREAT INTEL</p>
+      <h2>CISA KEV Catalog</h2>
+      <p className="subtle">Search the Known Exploited Vulnerabilities catalog.</p>
+      <form onSubmit={searchCisa} style={{ display: "flex", gap: "10px", marginTop: "14px", marginBottom: "14px" }}>
+        <input type="text" value={cisaQuery} onChange={(e) => setCisaQuery(e.target.value)} placeholder="Search vendor, product, or CVE..." style={{ flex: 1, padding: "8px", background: "#071511", border: "1px solid var(--line)", borderRadius: "7px", color: "var(--text)" }} />
+        <button type="submit" disabled={cisaBusy} style={{ padding: "8px 12px" }}>{cisaBusy ? "..." : "Search"}</button>
+      </form>
+      {cisaResults && (
+        <div style={{ maxHeight: "200px", overflowY: "auto", background: "#0a1915", border: "1px solid var(--line)", borderRadius: "7px", padding: "10px" }}>
+          {cisaResults.length === 0 ? <p className="subtle">No results found.</p> : cisaResults.map(r => (
+            <div key={r.cve_id} style={{ borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
+              <strong style={{ color: "var(--amber)", fontSize: "11px" }}>{r.cve_id}</strong>
+              <p style={{ margin: "4px 0", fontSize: "10px" }}>{r.vendor_project} {r.product}</p>
+              <small style={{ color: "var(--muted)", fontSize: "9px" }}>{r.vulnerability_name}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      <button onClick={updateCisa} disabled={cisaUpdateBusy} style={{ marginTop: "14px", width: "100%" }}>
+        {cisaUpdateBusy ? "Updating…" : "Update Catalog"}
+      </button>
+      {cisaMsg && <p className={cisaMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{cisaMsg}</p>}
     </aside>
     <aside className="card system-card pairing-card">
       <p className="eyebrow">DEVICE PAIRING</p>
