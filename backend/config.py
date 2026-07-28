@@ -41,6 +41,9 @@ CORS_ALLOW_ORIGINS = [
 DNS_ENABLED = os.environ.get("HOMERADAR_DNS_ENABLED", "false").lower() in {"1", "true", "yes"}
 DNS_HOST = os.environ.get("HOMERADAR_DNS_HOST", "0.0.0.0")
 DNS_PORT = int(os.environ.get("HOMERADAR_DNS_PORT", "5354"))
+DNS_ALLOW_PUBLIC_CLIENTS = os.environ.get(
+    "HOMERADAR_DNS_ALLOW_PUBLIC_CLIENTS", "false"
+).lower() in {"1", "true", "yes"}
 DNS_UPSTREAM = os.environ.get("HOMERADAR_DNS_UPSTREAM", "1.1.1.1")
 DNS_UPSTREAMS = [
     value.strip()
