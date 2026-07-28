@@ -46,8 +46,28 @@ def wait_for_health(port: int, process: subprocess.Popen[str], timeout: float) -
 
 
 def terminate(process: subprocess.Popen[str]) -> None:
+    """Stop the complete frozen-process tree on every supported platform."""
     if process.poll() is not None:
         return
+
+    if os.name == "nt":
+        # A PyInstaller one-file executable uses a bootloader parent and an
+        # application child. Terminating only the parent can leave the child
+        # holding SQLite files open, so stop the complete Windows process tree.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=15,
+        )
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+        return
+
     process.terminate()
     try:
         process.wait(timeout=8)
@@ -56,20 +76,21 @@ def terminate(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
-def cleanup_data_dir(path: Path, attempts: int = 10, delay: float = 0.5) -> None:
-    """Remove the temp data dir, retrying on Windows where a just-terminated
-    process's SQLite file handle can stay locked for a moment after wait()
-    returns, making an immediate rmtree race a PermissionError (WinError 32)."""
-    for attempt in range(attempts):
+def cleanup_data_dir(path: Path, attempts: int = 20, delay: float = 0.5) -> None:
+    """Best-effort removal of temporary data after all child processes stop."""
+    last_error: OSError | None = None
+    for _attempt in range(attempts):
         try:
             shutil.rmtree(path)
             return
         except FileNotFoundError:
             return
-        except (PermissionError, OSError):
-            if attempt == attempts - 1:
-                raise
+        except OSError as error:
+            last_error = error
             time.sleep(delay)
+    # A successful health check must not be converted into a product failure by
+    # runner-specific antivirus/indexer file locks in the disposable temp tree.
+    print(f"Warning: could not remove temporary smoke-test data: {last_error}", file=sys.stderr)
 
 
 def main() -> int:
