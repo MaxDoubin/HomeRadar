@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, dashboardSocket } from "./api";
 
 const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings"];
