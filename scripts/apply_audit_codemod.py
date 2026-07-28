@@ -1,8 +1,4 @@
-"""Apply exact, reviewable fixes that are awkward through the contents API.
-
-This file is executed once by ``audit-codemod.yml`` and removes itself and the
-one-time workflow after updating the branch.
-"""
+"""Apply exact source fixes and refresh the desktop dependency lock."""
 from __future__ import annotations
 
 import json
@@ -100,22 +96,7 @@ replace_exact(
 ''',
 )
 
-replace_exact(
-    ".github/workflows/desktop.yml",
-    "          sha256sum * > SHA256SUMS.txt\n",
-    "          sha256sum -- ./* > SHA256SUMS.txt\n",
-)
-
-replace_exact(
-    ".github/workflows/deep-audit.yml",
-    "        run: npm install --no-save eslint@9 @eslint/js globals\n",
-    "        run: npm install --no-save eslint@9 @eslint/js globals eslint-plugin-react\n",
-)
-
 package_path = ROOT / "desktop/package.json"
 package = json.loads(package_path.read_text())
 package["overrides"] = {"brace-expansion": "5.0.8"}
 package_path.write_text(json.dumps(package, indent=2) + "\n")
-
-(ROOT / ".github/workflows/audit-codemod.yml").unlink()
-Path(__file__).unlink()
