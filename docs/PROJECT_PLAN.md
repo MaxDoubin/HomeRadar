@@ -57,7 +57,7 @@ flash, plug in, protected.
 - [x] Non-invasive service exposure audit from observed ports (no credential attempts)
 - Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
   detection)
-- Mobile companion app (React Native) for push notifications
+- [x] Mobile companion apps (native iOS/SwiftUI and Android/Kotlin) for push notifications
 - Auto-update mechanism for blocklists and threat intel
 
 ---
@@ -223,10 +223,10 @@ email.**
 Home Radar
 
 **Programming languages:**
-Python, JavaScript
+Python, JavaScript, Swift, Kotlin
 
 **Platform:**
-Web
+Web, iOS, Android
 
 **What does your app do? (400 words)**
 Core angles: turns e-waste into security appliance, $0 cost, network discovery, DNS

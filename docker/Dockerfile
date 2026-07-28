@@ -1,5 +1,6 @@
-FROM node:22-alpine AS dashboard
+FROM debian:12-slim AS dashboard
 WORKDIR /src/frontend
+RUN apt-get update && apt-get install -y nodejs npm
 COPY frontend/package*.json ./
 RUN npm install
 COPY frontend/ ./
