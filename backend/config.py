@@ -27,8 +27,8 @@ COMMON_PORTS = [
     32400, 49152, 62078,
 ]
 
-# API. Browser cross-origin access is denied unless explicitly configured.
-API_HOST = os.environ.get("HOMERADAR_API_HOST", "0.0.0.0")
+# API. Local-only by default; appliance deployments explicitly opt into LAN binding.
+API_HOST = os.environ.get("HOMERADAR_API_HOST", "127.0.0.1")
 API_PORT = int(os.environ.get("HOMERADAR_API_PORT", "8000"))
 CORS_ALLOW_ORIGINS = [
     value.strip()
@@ -36,10 +36,10 @@ CORS_ALLOW_ORIGINS = [
     if value.strip()
 ]
 
-# DNS proxy and blocklists. Binding port 53 normally requires root/CAP_NET_BIND_SERVICE;
-# development defaults to 5354 so the API can run unprivileged.
+# DNS proxy and blocklists. Local-only by default. Docker/systemd appliance
+# configurations explicitly bind to the LAN when DNS service is enabled.
 DNS_ENABLED = os.environ.get("HOMERADAR_DNS_ENABLED", "false").lower() in {"1", "true", "yes"}
-DNS_HOST = os.environ.get("HOMERADAR_DNS_HOST", "0.0.0.0")
+DNS_HOST = os.environ.get("HOMERADAR_DNS_HOST", "127.0.0.1")
 DNS_PORT = int(os.environ.get("HOMERADAR_DNS_PORT", "5354"))
 DNS_ALLOW_PUBLIC_CLIENTS = os.environ.get(
     "HOMERADAR_DNS_ALLOW_PUBLIC_CLIENTS", "false"
