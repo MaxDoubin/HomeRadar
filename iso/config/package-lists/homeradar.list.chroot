@@ -13,3 +13,6 @@ lightdm
 network-manager
 sudo
 ca-certificates
+wireless-tools
+wpasupplicant
+iw
