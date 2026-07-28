@@ -8,6 +8,10 @@ device discovery, DNS-level threat blocking, and real-time alerts - for **$0**.
 
 Built for the [Congressional App Challenge](https://www.congressionalappchallenge.us/) 2026, NV-03.
 
+## About
+
+HomeRadar is an open-source home network security appliance built with a Python backend, a React frontend dashboard, an Electron-based cross-platform desktop application, and native iOS (SwiftUI) and Android (Kotlin) companion apps.
+
 ## Status
 
 **The integrated MVP foundation is implemented.** Home Radar combines advanced device
@@ -43,11 +47,19 @@ For backend development:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
-.venv/bin/python -m backend.main
+.venv/bin/pip install -r backend/requirements-dev.txt
+PYTHONPATH=. .venv/bin/python3 -m backend.main
 ```
 
-For frontend development, run `npm install && npm run dev` in `frontend/`.
-To run frontend tests, run `npm run test` in `frontend/`.
+To run backend tests, execute `python3 -m pytest tests/` after activating the virtual environment.
+
+For frontend development, execute `cd frontend && npm install && npm run dev`.
+To run frontend tests, execute `cd frontend && npm install && npm run test`.
+To build the frontend, execute `cd frontend && npm install && npm run build`.
+
+The frontend can be built and run in a standalone interactive 'Demo Mode' (using mock data without a backend) by setting the `VITE_DEMO_MODE=true` environment variable before executing frontend tests or build commands (e.g., `VITE_DEMO_MODE=true npm run build`).
+
+To build and package the Electron desktop application, navigate to `desktop/`, run `npm install`, execute `bash build.sh` (to build the frontend and package the backend), and then run `npm run build`. The Electron app bundles the Python backend into a standalone executable using PyInstaller. Database and data directories are automatically redirected to the OS user data directory to avoid permission issues.
 
 ## How it works
 
