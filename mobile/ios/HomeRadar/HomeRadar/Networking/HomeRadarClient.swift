@@ -1,15 +1,10 @@
 import Foundation
 
-/// Async/await REST client for the HomeRadar appliance API.
+/// Async/await REST client for the Home Radar appliance API.
 ///
-/// The appliance runs plain `http://` with no TLS today, so this client
-/// never assumes or upgrades to `https://` -- if the caller's stored
-/// address string has no scheme, `http://` is prepended; if it already has
-/// one, it's left alone.
-///
-/// Every request is built through `attachAuth(_:)`, the single choke point
-/// that sets the `X-HomeRadar-Token` header. No call site should set that
-/// header ad hoc.
+/// The appliance runs plain `http://` on a trusted LAN by default. If an
+/// address has no scheme, `http://` is prepended; an explicit scheme is kept.
+/// Every authenticated request is built through `attachAuth(_:)`.
 final class HomeRadarClient {
     enum ClientError: Error, LocalizedError {
         case invalidAddress
@@ -23,7 +18,7 @@ final class HomeRadarClient {
             case .invalidResponse:
                 return "The appliance sent an unexpected response."
             case .http(let status, let body):
-                return "HomeRadar returned HTTP \(status)." + (body.map { " \($0)" } ?? "")
+                return "Home Radar returned HTTP \(status)." + (body.map { " \($0)" } ?? "")
             }
         }
     }
@@ -32,12 +27,7 @@ final class HomeRadarClient {
     private static let encoder = JSONEncoder()
     private static let decoder = JSONDecoder()
 
-    /// The appliance address as the user entered/discovered it (e.g.
-    /// `"homeradar.local:8000"` or a raw LAN IP:port). Mutated in place by
-    /// `AppSession` when the user (re)connects.
     var baseAddress: String
-
-    /// The current pairing token, if any. Mutated in place by `AppSession`.
     var token: String?
 
     init(session: URLSession = .shared, baseAddress: String = "", token: String? = nil) {
@@ -51,10 +41,13 @@ final class HomeRadarClient {
     private func resolvedBaseURL() throws -> URL {
         let trimmed = baseAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ClientError.invalidAddress }
-        let withScheme = trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://")
+        let lowercased = trimmed.lowercased()
+        let withScheme = lowercased.hasPrefix("http://") || lowercased.hasPrefix("https://")
             ? trimmed
             : "http://\(trimmed)"
-        guard let url = URL(string: withScheme) else { throw ClientError.invalidAddress }
+        guard let url = URL(string: withScheme), url.host != nil else {
+            throw ClientError.invalidAddress
+        }
         return url
     }
 
@@ -76,34 +69,30 @@ final class HomeRadarClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let body {
-            request.httpBody = body
-        }
+        request.httpBody = body
         attachAuth(&request)
         return request
     }
 
     /// The single choke point that attaches the pairing token to a request.
-    /// Harmless to call even against endpoints that don't require auth.
     func attachAuth(_ request: inout URLRequest) {
         if let token, !token.isEmpty {
             request.setValue(token, forHTTPHeaderField: AuthToken.headerName)
         }
     }
 
-    /// Builds the `ws://` (or `wss://` if the stored address explicitly
-    /// used `https://`) URL for the dashboard websocket, including the
-    /// pairing token as a `?token=` query item when one is set.
+    /// Builds the `ws://` or `wss://` dashboard URL without credentials.
+    /// The caller attaches the pairing token as an upgrade-request header so
+    /// it never appears in URLs, access logs, or crash reports.
     func webSocketURL() throws -> URL {
         let http = try resolvedBaseURL()
         guard var components = URLComponents(url: http, resolvingAgainstBaseURL: false) else {
             throw ClientError.invalidAddress
         }
-        components.scheme = (components.scheme?.lowercased() == "https") ? "wss" : "ws"
-        components.path = components.path + "/ws"
-        if let token, !token.isEmpty {
-            components.queryItems = [URLQueryItem(name: "token", value: token)]
-        }
+        components.scheme = components.scheme?.lowercased() == "https" ? "wss" : "ws"
+        components.path = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.path = "/" + ([components.path, "ws"].filter { !$0.isEmpty }.joined(separator: "/"))
+        components.query = nil
         guard let url = components.url else { throw ClientError.invalidAddress }
         return url
     }
@@ -158,9 +147,6 @@ final class HomeRadarClient {
         return try await perform(request, decoding: Device.self)
     }
 
-    /// Triggers a manual device scan. Response shape is unused this pass --
-    /// fire-and-refresh (the next websocket snapshot will reflect any
-    /// newly-discovered devices) is enough.
     func triggerScan() async throws {
         _ = try await perform(makeRequest(path: "/scan", method: "POST"))
     }

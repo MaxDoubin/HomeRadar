@@ -1,9 +1,8 @@
-"""Lightweight pairing-token auth for HomeRadar's API.
+"""Lightweight pairing-token authentication for the Home Radar appliance.
 
-Home Radar is a single-family appliance, not a multi-tenant service, so this
-deliberately stays simple: one long-lived opaque token (no JWT/expiry), and
-a short-lived, single-use 6-digit code used only to hand that token to a new
-mobile device without ever displaying the token itself on screen.
+Home Radar is a single-family appliance, not a multi-tenant service. It uses one
+long-lived opaque management token and short-lived, single-use six-digit codes
+to hand that token to newly paired browsers or mobile devices.
 """
 from __future__ import annotations
 
@@ -11,7 +10,7 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Header, HTTPException
+from fastapi import Cookie, Header, HTTPException
 
 from backend.db import get_conn, models
 
@@ -33,9 +32,12 @@ def _parse_iso(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def generate_token() -> str:
@@ -47,7 +49,7 @@ def generate_code() -> str:
 
 
 def get_or_create_token(conn) -> str:
-    """Return the appliance's pairing token, minting one on first use."""
+    """Return the appliance management token, minting one on first use."""
     token = models.get_setting(conn, _TOKEN_KEY)
     if not token:
         token = generate_token()
@@ -56,7 +58,7 @@ def get_or_create_token(conn) -> str:
 
 
 def regenerate_token(conn) -> str:
-    """Mint a fresh token, invalidating any previously issued one."""
+    """Mint a fresh token, invalidating every previously paired client."""
     token = generate_token()
     models.set_settings(conn, {_TOKEN_KEY: token})
     return token
@@ -75,7 +77,10 @@ def _is_locked(conn) -> bool:
 
 
 def _register_failure(conn) -> None:
-    count = int(models.get_setting(conn, _FAIL_COUNT_KEY, "0") or "0") + 1
+    try:
+        count = int(models.get_setting(conn, _FAIL_COUNT_KEY, "0") or "0") + 1
+    except ValueError:
+        count = 1
     updates = {_FAIL_COUNT_KEY: str(count)}
     if count >= _MAX_FAILURES:
         updates[_LOCKED_UNTIL_KEY] = (_now() + timedelta(seconds=_LOCKOUT_SECONDS)).isoformat()
@@ -87,6 +92,7 @@ def _clear_failures(conn) -> None:
 
 
 def issue_pairing_code(conn, ttl_seconds: int = 600) -> dict:
+    ttl_seconds = max(60, min(int(ttl_seconds), 3600))
     code = generate_code()
     expires_at = _now() + timedelta(seconds=ttl_seconds)
     models.set_settings(
@@ -106,12 +112,7 @@ def pairing_status(conn) -> dict:
 
 
 def redeem_pairing_code(conn, presented_code: str) -> str | None:
-    """Exchange a valid, unexpired, unused pairing code for the API token.
-
-    Returns None (without consuming the real outstanding code) on any
-    mismatch, expiry, or while locked out from too many recent failures --
-    this way a mistyped attempt never burns the real code.
-    """
+    """Exchange a valid, unexpired, unused pairing code for the API token."""
     if _is_locked(conn):
         return None
     code = models.get_setting(conn, _CODE_KEY)
@@ -131,19 +132,22 @@ def redeem_pairing_code(conn, presented_code: str) -> str | None:
     return get_or_create_token(conn)
 
 
+def _bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, separator, value = authorization.partition(" ")
+    if separator and scheme.lower() == "bearer" and value.strip():
+        return value.strip()
+    return None
+
+
 def require_token(
     x_homeradar_token: str | None = Header(default=None, alias="X-HomeRadar-Token"),
     authorization: str | None = Header(default=None),
+    homeradar_token: str | None = Cookie(default=None),
 ) -> None:
-    """FastAPI dependency gating mutating endpoints behind the pairing token.
-
-    Accepts either an `X-HomeRadar-Token` header or a standard
-    `Authorization: Bearer <token>` header so mobile HTTP libraries can use
-    whichever is more natural for them.
-    """
-    presented = x_homeradar_token
-    if not presented and authorization and authorization.startswith("Bearer "):
-        presented = authorization.removeprefix("Bearer ")
+    """Gate protected routes behind header, Bearer, or same-site cookie auth."""
+    presented = x_homeradar_token or _bearer_token(authorization) or homeradar_token
     with get_conn() as conn:
         if not verify_token(conn, presented):
             raise HTTPException(status_code=401, detail="Missing or invalid pairing token")

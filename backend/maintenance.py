@@ -1,6 +1,7 @@
 """Database retention, verified backups, and appliance health diagnostics."""
 from __future__ import annotations
 
+import re
 import shutil
 import sqlite3
 from datetime import datetime, timedelta, timezone
@@ -8,17 +9,42 @@ from pathlib import Path
 
 from backend import config
 
+_BACKUP_NAME = re.compile(r"^homeradar-\d{8}T\d{6}(?:\d{6})?Z\.db$")
+_SECRET_SETTING_KEYS = (
+    "pairing_token",
+    "pairing_code",
+    "pairing_code_expires_at",
+    "pairing_fail_count",
+    "pairing_locked_until",
+)
+
 
 def create_backup(
     source_path: str = config.DB_PATH,
     backup_dir: Path = config.BACKUP_DIR,
 ) -> Path:
     backup_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = backup_dir / f"homeradar-{timestamp}.db"
-    with sqlite3.connect(source_path) as source, sqlite3.connect(target) as destination:
-        source.backup(destination)
-        check = destination.execute("PRAGMA quick_check").fetchone()[0]
+    try:
+        with sqlite3.connect(source_path, timeout=30) as source, sqlite3.connect(
+            target, timeout=30
+        ) as destination:
+            source.backup(destination)
+            settings_exists = destination.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'settings'"
+            ).fetchone()
+            if settings_exists:
+                placeholders = ",".join("?" for _ in _SECRET_SETTING_KEYS)
+                destination.execute(
+                    f"DELETE FROM settings WHERE key IN ({placeholders})",
+                    _SECRET_SETTING_KEYS,
+                )
+                destination.commit()
+            check = destination.execute("PRAGMA quick_check").fetchone()[0]
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     if check != "ok":
         target.unlink(missing_ok=True)
         raise RuntimeError(f"backup integrity check failed: {check}")
@@ -37,22 +63,43 @@ def list_backups(backup_dir: Path = config.BACKUP_DIR) -> list[dict]:
             ).isoformat(),
         }
         for path in sorted(backup_dir.glob("homeradar-*.db"), reverse=True)
-        if path.is_file()
+        if path.is_file() and _BACKUP_NAME.fullmatch(path.name)
     ]
 
 
 def backup_path(name: str, backup_dir: Path = config.BACKUP_DIR) -> Path | None:
-    if not name.startswith("homeradar-") or not name.endswith(".db") or "/" in name:
+    """Resolve a generated backup name without allowing path traversal."""
+    if not _BACKUP_NAME.fullmatch(name):
+        return None
+    if Path(name).name != name or "/" in name or "\\" in name:
         return None
     candidate = backup_dir / name
-    return candidate if candidate.is_file() else None
+    try:
+        resolved = candidate.resolve(strict=True)
+        root = backup_dir.resolve(strict=True)
+    except (FileNotFoundError, OSError):
+        return None
+    if resolved.parent != root or not resolved.is_file():
+        return None
+    return resolved
 
 
 def prune_backups(
     backup_dir: Path = config.BACKUP_DIR,
     keep: int = config.BACKUP_RETENTION_COUNT,
 ) -> int:
-    backups = sorted(backup_dir.glob("homeradar-*.db"), reverse=True) if backup_dir.exists() else []
+    backups = (
+        sorted(
+            (
+                path
+                for path in backup_dir.glob("homeradar-*.db")
+                if path.is_file() and _BACKUP_NAME.fullmatch(path.name)
+            ),
+            reverse=True,
+        )
+        if backup_dir.exists()
+        else []
+    )
     removed = 0
     for path in backups[max(1, keep):]:
         path.unlink()
@@ -119,8 +166,8 @@ def health_report(conn) -> dict:
             "enabled": config.DNS_ENABLED,
             "listen": f"{config.DNS_HOST}:{config.DNS_PORT}",
             "upstream": conn.execute(
-                "SELECT COALESCE((SELECT value FROM settings WHERE key = 'dns_upstream'), ?)"
-                , (config.DNS_UPSTREAM,)
+                "SELECT COALESCE((SELECT value FROM settings WHERE key = 'dns_upstream'), ?)",
+                (config.DNS_UPSTREAM,),
             ).fetchone()[0],
         },
         "last_device_seen": last_seen,

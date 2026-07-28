@@ -1,25 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Talking to the local HomeRadar appliance over the LAN. -->
+    <!-- Talking to the local Home Radar appliance over the LAN. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
-    <!-- Local notifications for newly-appeared alerts (Android 13+ requires this at runtime too). -->
+    <!-- Local notifications for newly appeared alerts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".HomeRadarApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:label="@string/app_name"
         android:theme="@style/Theme.HomeRadar"
         android:usesCleartextTraffic="true">
 
         <!--
-          usesCleartextTraffic is required: the appliance is reached over plain
-          http:// on the local network (e.g. "homeradar.local:8000"), not https.
+          Cleartext HTTP is required for a local appliance such as
+          http://homeradar.local:8000. The management token is stored in
+          EncryptedSharedPreferences, and Android cloud/device backup is disabled
+          so device-bound encrypted state is never restored onto another device.
         -->
 
         <activity

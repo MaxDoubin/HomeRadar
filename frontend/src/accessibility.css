@@ -1,0 +1,99 @@
+/* Accessibility and interaction polish layered over the visual system. */
+
+:where(button, a, input, textarea, select):focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+
+button:disabled,
+input:disabled,
+textarea:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  touch-action: manipulation;
+}
+
+::selection {
+  color: #03110c;
+  background: var(--green);
+}
+
+* {
+  scrollbar-color: #245a49 #07130f;
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: #07130f;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid #07130f;
+  border-radius: 999px;
+  background: #245a49;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: #31765f;
+}
+
+@media (max-width: 720px) {
+  .sidebar {
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding-bottom: calc(5px + env(safe-area-inset-bottom));
+  }
+
+  .content {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  }
+
+  nav button,
+  .scan-mini,
+  .primary {
+    min-height: 42px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --line: #3c675b;
+    --muted: #a9c0b9;
+  }
+
+  .card,
+  .toolbar input,
+  .settings-form input,
+  .policy-times input,
+  .domain-rule input {
+    border-width: 2px;
+  }
+}

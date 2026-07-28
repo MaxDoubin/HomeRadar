@@ -2,29 +2,17 @@ package com.homeradar.core.net
 
 import com.homeradar.core.model.HomeRadarJson
 import com.homeradar.core.model.SnapshotMessage
-import kotlinx.serialization.decodeFromString
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.decodeFromString
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
-/**
- * Pure exponential backoff schedule for websocket reconnect attempts.
- *
- * Given the delay used for the previous attempt (or 0 / any value < the
- * starting delay for the very first attempt), returns the delay to use next:
- * starts at 2500ms, doubles each call, caps at 15000ms. So a fresh sequence
- * of calls produces 2500 -> 5000 -> 10000 -> 15000 -> 15000 -> ...
- *
- * This function is intentionally stateless -- callers reset back to the
- * start of the sequence simply by not calling it again until the next
- * disconnect (i.e. after any successful connection, forget the previous
- * value and start over from [INITIAL_BACKOFF_MILLIS] on the next failure).
- */
+/** Pure exponential backoff schedule for websocket reconnect attempts. */
 const val INITIAL_BACKOFF_MILLIS: Long = 2_500
 const val MAX_BACKOFF_MILLIS: Long = 15_000
 
@@ -34,20 +22,13 @@ fun nextBackoffMillis(previousMillis: Long): Long {
     return if (doubled > MAX_BACKOFF_MILLIS) MAX_BACKOFF_MILLIS else doubled
 }
 
-/**
- * Pure URL builder for the dashboard websocket, split out from [DashboardSocket]
- * so the "token goes in the query string, not a header" contract (the backend's
- * websocket upgrade can't read custom headers the way a REST call can) is
- * directly unit-testable without a real socket.
- */
-fun buildWsUrl(baseUrl: String, path: String = "/ws", token: String? = null): String =
-    baseUrl.trimEnd('/') + path + (token?.let { "?token=$it" } ?: "")
+/** Build the real dashboard WebSocket path without embedding credentials. */
+fun buildWsUrl(baseUrl: String, path: String = "/ws"): String =
+    baseUrl.trimEnd('/') + path
 
 /**
- * Listens to the HomeRadar dashboard websocket and decodes each text frame as
- * a [SnapshotMessage], publishing the latest one via [snapshots]. Consumers
- * (e.g. a ViewModel-style wrapper in the `:app` module, added later) collect
- * the flow; this class has no Android dependency of its own.
+ * Listens to dashboard snapshots. The pairing token is attached as a WebSocket
+ * upgrade header so it never appears in URLs, access logs, or crash reports.
  */
 class DashboardSocket(
     private val baseUrl: String,
@@ -64,8 +45,12 @@ class DashboardSocket(
     private var webSocket: WebSocket? = null
 
     fun connect(path: String = "/ws") {
-        val wsUrl = buildWsUrl(baseUrl, path, tokenProvider.currentToken())
-        webSocket = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), this)
+        val request = Request.Builder().url(buildWsUrl(baseUrl, path)).apply {
+            tokenProvider.currentToken()?.takeIf { it.isNotBlank() }?.let {
+                header(AUTH_HEADER_NAME, it)
+            }
+        }.build()
+        webSocket = httpClient.newWebSocket(request, this)
     }
 
     fun close() {
@@ -79,8 +64,8 @@ class DashboardSocket(
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
-        val snapshot = HomeRadarJson.decodeFromString<SnapshotMessage>(text)
-        _snapshots.value = snapshot
+        runCatching { HomeRadarJson.decodeFromString<SnapshotMessage>(text) }
+            .onSuccess { _snapshots.value = it }
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
