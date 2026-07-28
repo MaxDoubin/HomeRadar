@@ -8,7 +8,7 @@ on:
       - .github/workflows/audit-codemod.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   apply:
@@ -30,18 +30,10 @@ jobs:
       - name: Validate refreshed dependency graph
         working-directory: desktop
         run: npm audit --audit-level=high
-      - name: Package generated fixes
-        shell: bash
+      - name: Commit generated source and lock updates
         run: |
-          git diff --binary > audit-fixes.patch
-          git diff --name-only --diff-filter=ACMRT -z | tar --null -T - -czf audit-generated-files.tar.gz
-          git status --short
-      - name: Upload generated fixes
-        uses: actions/upload-artifact@v4
-        with:
-          name: audit-generated-fixes
-          path: |
-            audit-fixes.patch
-            audit-generated-files.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+          git config user.name "HomeRadar audit bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add backend desktop/package.json desktop/package-lock.json
+          git commit -m "Apply generated audit fixes"
+          git push origin HEAD:agent/full-code-audit
