@@ -19,8 +19,8 @@ renamed, ports are reused, and modern phones often randomize their MAC addresses
 ## Confidence and evidence
 
 Each matching signal adds weighted points to one or more categories. Strongly
-device-specific signals—such as IPP printing, Roku control, Home Assistant, or an
-InternetGatewayDevice advertisement—carry more weight than generic services such as SSH
+device-specific signals-such as IPP printing, Roku control, Home Assistant, or an
+InternetGatewayDevice advertisement-carry more weight than generic services such as SSH
 or a web interface.
 
 The API returns:
@@ -39,6 +39,6 @@ That is safer than confidently assigning the wrong icon or security policy.
 ## Privacy and safety
 
 Discovery stays on the local network. The scanner uses a small, curated port set intended
-for identity—not a broad vulnerability scan—and does not fetch arbitrary UPnP
+for identity-not a broad vulnerability scan-and does not fetch arbitrary UPnP
 description URLs. MAC vendor lookup is local and randomized/private MACs are labeled as
 such instead of being falsely attributed to a manufacturer.
