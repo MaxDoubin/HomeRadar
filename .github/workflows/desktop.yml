@@ -88,9 +88,21 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          npm ci
-          npm test
-          npm run build -- --${{ matrix.arch }}
+          set -o pipefail
+          {
+            npm ci
+            npm test
+            npm run build -- --${{ matrix.arch }}
+          } 2>&1 | tee desktop-build-${{ matrix.target }}.log
+
+      - name: Preserve desktop build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-build-log-${{ matrix.target }}
+          path: desktop/desktop-build-${{ matrix.target }}.log
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Prepare stable download names
         run: |
@@ -153,9 +165,22 @@ jobs:
       - name: Build Android application
         working-directory: mobile/android
         run: |
-          gradle :core:test :app:assembleDebug --stacktrace
-          mkdir -p ../../release
-          cp app/build/outputs/apk/debug/app-debug.apk ../../release/HomeRadar-Android.apk
+          set -o pipefail
+          gradle :core:test :app:assembleDebug --stacktrace 2>&1 | tee android-build.log
+
+      - name: Preserve Android build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build-log
+          path: mobile/android/android-build.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Prepare Android download
+        run: |
+          mkdir -p release
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk release/HomeRadar-Android.apk
 
       - name: Upload Android download
         uses: actions/upload-artifact@v4
