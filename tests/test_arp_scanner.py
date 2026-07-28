@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import socket
-import sys
 import types
 
 from backend.discovery import arp_scanner
@@ -70,8 +69,8 @@ def test_detect_local_subnet_returns_none_when_everything_fails(monkeypatch):
     assert arp_scanner.detect_local_subnet() is None
 
 
-def test_scan_uses_active_fallback_when_scapy_unavailable(monkeypatch):
-    monkeypatch.setitem(sys.modules, "scapy.all", None)
+def test_scan_uses_active_fallback_when_raw_arp_unavailable(monkeypatch):
+    monkeypatch.setattr(arp_scanner, "_raw_arp_scan", lambda network, timeout: [])
     monkeypatch.setattr(
         arp_scanner,
         "_active_neighbor_scan",
@@ -102,14 +101,18 @@ def test_scan_refuses_bogus_subnet():
 
 
 def test_scan_returns_sorted_devices_and_prefers_raw_arp(monkeypatch):
-    import scapy.all as scapy_all
+    import scapy.sendrecv as scapy_sendrecv
 
     answered = [
         (None, types.SimpleNamespace(hwsrc="aa:bb:cc:dd:ee:02", psrc="192.168.1.6")),
         (None, types.SimpleNamespace(hwsrc="aa:bb:cc:dd:ee:01", psrc="192.168.1.5")),
     ]
 
-    monkeypatch.setattr(scapy_all, "srp", lambda packet, timeout=None, verbose=None: (answered, []))
+    monkeypatch.setattr(
+        scapy_sendrecv,
+        "srp",
+        lambda packet, timeout=None, verbose=None: (answered, []),
+    )
     monkeypatch.setattr(
         arp_scanner,
         "_active_neighbor_scan",
@@ -126,12 +129,12 @@ def test_scan_returns_sorted_devices_and_prefers_raw_arp(monkeypatch):
 
 
 def test_scan_falls_back_on_permission_error(monkeypatch):
-    import scapy.all as scapy_all
+    import scapy.sendrecv as scapy_sendrecv
 
     def fake_srp(packet, timeout=None, verbose=None):
         raise PermissionError("need root")
 
-    monkeypatch.setattr(scapy_all, "srp", fake_srp)
+    monkeypatch.setattr(scapy_sendrecv, "srp", fake_srp)
     monkeypatch.setattr(
         arp_scanner,
         "_active_neighbor_scan",
@@ -145,11 +148,11 @@ def test_scan_falls_back_on_permission_error(monkeypatch):
 
 
 def test_scan_falls_back_on_os_error(monkeypatch):
-    import scapy.all as scapy_all
+    import scapy.sendrecv as scapy_sendrecv
 
     def fake_srp(packet, timeout=None, verbose=None):
         raise OSError("socket error")
 
-    monkeypatch.setattr(scapy_all, "srp", fake_srp)
+    monkeypatch.setattr(scapy_sendrecv, "srp", fake_srp)
     monkeypatch.setattr(arp_scanner, "_active_neighbor_scan", lambda network, timeout: [])
     assert arp_scanner.scan(subnet="192.168.1.0/29") == []
