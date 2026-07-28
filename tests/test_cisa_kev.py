@@ -64,7 +64,7 @@ def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_d
     )
 
     with models.get_conn(db_path) as conn:
-        count = update_catalog(conn, url="http://kev.example/feed.json")
+        count = update_catalog(conn, url="https://kev.example/feed.json")
     assert count == 1
 
     with models.get_conn(db_path) as conn:
@@ -94,7 +94,7 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
         lambda request, timeout=None: _FakeJSONResponse(first_payload),
     )
     with models.get_conn(db_path) as conn:
-        update_catalog(conn, url="http://kev.example/feed.json")
+        update_catalog(conn, url="https://kev.example/feed.json")
 
     second_payload = {
         "vulnerabilities": [
@@ -115,12 +115,12 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
         lambda request, timeout=None: _FakeJSONResponse(second_payload),
     )
     with models.get_conn(db_path) as conn:
-        count = update_catalog(conn, url="http://kev.example/feed.json")
+        count = update_catalog(conn, url="https://kev.example/feed.json")
     assert count == 1
 
     with models.get_conn(db_path) as conn:
         rows = conn.execute("SELECT * FROM cisa_kev").fetchall()
-    assert len(rows) == 1  # updated in place, not duplicated
+    assert len(rows) == 1
     row = dict(rows[0])
     assert row["vendor_project"] == "NewVendor"
     assert row["vulnerability_name"] == "Issue updated"
@@ -161,11 +161,8 @@ def test_search_catalog_filters_by_query_and_clamps_limit(patched_db, db_path):
         no_match = search_catalog(conn, query="NoSuchVendor")
         assert no_match == []
 
-        # limit is clamped to at least 1, even when a caller passes 0 or negative.
         clamped_low = search_catalog(conn, limit=0)
         assert len(clamped_low) == 1
 
-        # limit is clamped to at most 500; a huge request must not error and
-        # must not return more rows than actually exist.
         clamped_high = search_catalog(conn, limit=100_000)
         assert len(clamped_high) == 3
