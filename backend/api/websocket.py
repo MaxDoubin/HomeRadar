@@ -37,21 +37,27 @@ def _websocket_token(websocket: WebSocket) -> str | None:
     if not token:
         token = websocket.headers.get("x-homeradar-token")
     authorization = websocket.headers.get("authorization", "")
-    if not token and authorization.startswith("Bearer "):
-        token = authorization.removeprefix("Bearer ").strip()
+    if not token and authorization:
+        scheme, separator, value = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer":
+            token = value.strip()
     if not token:
         token = websocket.cookies.get("homeradar_token")
     return token or None
+
+
+def _token_is_valid(token: str | None) -> bool:
+    if not token:
+        return False
+    with get_conn() as conn:
+        return verify_token(conn, token)
 
 
 @router.websocket("/ws")
 async def dashboard_websocket(websocket: WebSocket):
     local = is_local_host(websocket.client.host if websocket.client else None)
     token = _websocket_token(websocket)
-    token_valid = False
-    if token:
-        with get_conn() as conn:
-            token_valid = verify_token(conn, token)
+    token_valid = _token_is_valid(token)
 
     # A supplied bad credential is always rejected, even from loopback. A
     # credential-free connection is allowed only for the appliance's own UI.
@@ -62,6 +68,9 @@ async def dashboard_websocket(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
+            if token and not _token_is_valid(token):
+                await websocket.close(code=4401, reason="Pairing token was revoked")
+                return
             await websocket.send_json(dashboard_snapshot())
             try:
                 await asyncio.wait_for(websocket.receive_text(), timeout=3)
