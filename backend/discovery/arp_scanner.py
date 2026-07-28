@@ -1,21 +1,27 @@
-"""ARP-based LAN device discovery.
+"""Privilege-free active LAN discovery.
 
-Broadcasts an ARP "who-has" request across the local subnet and collects
-who-is-at replies. Requires raw socket access (root, or CAP_NET_RAW on the
-Python interpreter) because it crafts Ethernet/ARP frames directly.
+Home Radar primes the operating system's neighbor cache with ordinary UDP
+traffic and then reads the cache through the platform tools in
+``neighbor_scanner``. This works without root, raw sockets, or packet-capture
+permissions on Linux, macOS, and Windows hosts.
 """
 from __future__ import annotations
 
 import ipaddress
 import logging
 import re
+import socket
 import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
 
-logger = logging.getLogger("homeradar.arp_scanner")
+from backend.discovery.neighbor_scanner import scan as neighbor_scan
+
+logger = logging.getLogger("homeradar.active_scanner")
 
 
 def detect_local_subnet() -> str | None:
-    """Detect the primary IPv4 subnet, preserving the interface's real prefix."""
+    """Detect the primary IPv4 subnet, preserving the interface prefix on Linux."""
     try:
         completed = subprocess.run(
             ("ip", "-o", "-4", "addr", "show", "scope", "global"),
@@ -31,31 +37,33 @@ def detect_local_subnet() -> str | None:
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         pass
 
-    # Portable fallback when `iproute2` is unavailable.
-    import socket
+    # UDP connect performs only a routing-table lookup; it does not send data.
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            local_ip = s.getsockname()[0]
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route_socket:
+            route_socket.connect(("192.0.2.1", 9))
+            local_ip = route_socket.getsockname()[0]
+        if ipaddress.ip_address(local_ip).is_loopback:
+            return None
         return str(ipaddress.ip_network(f"{local_ip}/24", strict=False))
     except OSError:
         logger.warning("Could not auto-detect local subnet")
         return None
 
 
-def scan(subnet: str | None = None, timeout: float = 3.0) -> list[dict]:
-    """Send an ARP broadcast over `subnet` and return [{"ip": ..., "mac": ...}, ...].
-
-    `subnet` is CIDR notation, e.g. "192.168.1.0/24". If None, it is
-    auto-detected from the default network interface.
-    """
+def _probe_host(address: str) -> None:
+    """Trigger normal neighbor resolution without requiring a privileged socket."""
     try:
-        from scapy.all import ARP, Ether, srp
-        from scapy.error import Scapy_Exception
-    except ImportError:
-        logger.error("scapy is not installed; ARP scanning is unavailable")
-        return []
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+            probe.settimeout(0.2)
+            probe.sendto(b"\x00", (address, 9))
+    except OSError:
+        # The packet is only used to populate the neighbor table. A closed port or
+        # unreachable host is expected and is not a scan failure.
+        return
 
+
+def scan(subnet: str | None = None, timeout: float = 1.0) -> list[dict]:
+    """Actively populate and read the OS neighbor cache for an IPv4 subnet."""
     target_subnet = subnet or detect_local_subnet()
     if not target_subnet:
         return []
@@ -66,35 +74,36 @@ def scan(subnet: str | None = None, timeout: float = 3.0) -> list[dict]:
         logger.error("Invalid LAN subnet: %s", target_subnet)
         return []
     if network.version != 4:
-        logger.error("ARP discovery only supports IPv4 subnets")
+        logger.error("Active discovery only supports IPv4 subnets")
         return []
     if network.num_addresses > 4096:
         logger.error(
-            "Refusing to ARP-scan %s addresses at once; set HOMERADAR_LAN_SUBNET "
+            "Refusing to probe %s addresses at once; set HOMERADAR_LAN_SUBNET "
             "to a /20 or smaller network",
             network.num_addresses,
         )
         return []
 
-    arp_request = ARP(pdst=str(network))
-    broadcast = Ether(dst="ff:ff:ff:ff:ff:ff")
-    packet = broadcast / arp_request
+    addresses = [str(address) for address in network.hosts()]
+    if addresses:
+        with ThreadPoolExecutor(max_workers=min(64, len(addresses))) as pool:
+            list(pool.map(_probe_host, addresses))
+        time.sleep(max(0.05, min(timeout, 2.0)))
 
-    try:
-        answered, _ = srp(packet, timeout=timeout, verbose=False)
-    except (PermissionError, Scapy_Exception) as exc:
-        message = str(exc).lower()
-        if "permission" in message or "/dev/bpf" in message or "root" in message:
-            logger.info("Raw ARP discovery is unavailable without elevated packet access; using neighbor cache fallback")
-            return []
-        logger.warning("ARP scan failed: %s", exc)
-        return []
-    except OSError as exc:
-        logger.warning("ARP scan failed: %s", exc)
-        return []
-
-    devices = {}
-    for _sent, received in answered:
-        mac = received.hwsrc.upper()
-        devices[mac] = {"ip": received.psrc, "mac": mac, "source": "arp"}
+    devices: dict[str, dict] = {}
+    for device in neighbor_scan():
+        try:
+            address = ipaddress.ip_address(device["ip"])
+        except (KeyError, ValueError):
+            continue
+        if address not in network:
+            continue
+        mac = str(device.get("mac", "")).upper()
+        if not mac:
+            continue
+        devices[mac] = {
+            "ip": str(address),
+            "mac": mac,
+            "source": "active_neighbor",
+        }
     return sorted(devices.values(), key=lambda item: ipaddress.ip_address(item["ip"]))
