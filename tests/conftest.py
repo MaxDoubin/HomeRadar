@@ -1,14 +1,9 @@
 """Shared pytest fixtures for the HomeRadar backend test suite.
 
-Big gotcha this file exists to solve: several backend functions bind
-`config.DB_PATH` / `config.BACKUP_DIR` as *default argument values at
-import time* (`get_conn(db_path=config.DB_PATH)`,
-`create_backup(backup_dir=config.BACKUP_DIR)`, etc.), and the modules that
-call them (`backend/api/routes.py`, `backend/api/websocket.py`,
-`backend/main.py`) import those names *by name* into their own module
-namespace. Monkeypatching `config.DB_PATH` alone, after those modules are
-already imported, changes nothing -- you have to patch the name where it's
-used (each importing module's own attribute), not just where it's defined.
+Several backend functions bind configuration paths as default argument values at
+import time. Tests therefore patch the names where they are used, not only the
+central config module, and keep every database, backup, and blocklist operation
+inside a temporary directory.
 """
 from __future__ import annotations
 
@@ -28,12 +23,13 @@ def db_path(tmp_path):
 
 @pytest.fixture
 def patched_db(monkeypatch, db_path):
-    """Point every module's `get_conn` at a throwaway temp-file database."""
+    """Point every module's get_conn at a throwaway temp-file database."""
     conn_factory = functools.partial(models_mod.get_conn, db_path)
     for target in [
         "backend.api.routes.get_conn",
         "backend.api.websocket.get_conn",
         "backend.pairing.get_conn",
+        "backend.security.get_conn",
         "backend.dns.proxy.get_conn",
         "backend.monitor.traffic_analyzer.get_conn",
         "backend.main.get_conn",
@@ -47,9 +43,7 @@ def patched_db(monkeypatch, db_path):
 
 @pytest.fixture
 def patched_backups(monkeypatch, tmp_path, db_path):
-    """Redirect every backup helper (both where it's defined and every place
-    it was imported by name) at a throwaway temp directory/DB, so tests
-    never touch the real backend/data/backups/ or backend/data/homeradar.db."""
+    """Redirect backup helpers and their imported aliases to temporary paths."""
     from backend import maintenance
 
     backups_dir = tmp_path / "backups"
@@ -68,11 +62,7 @@ def patched_backups(monkeypatch, tmp_path, db_path):
 
 @pytest.fixture
 def patched_blocklists(monkeypatch, tmp_path):
-    """`backend.services.blocklists` is a process-wide singleton created at
-    import time against the real `config.BLOCKLIST_PATH`, and
-    `backend.api.routes` imported the *name* `blocklists` directly --
-    patching `backend.services.blocklists` alone would not update
-    `routes.py`'s already-bound reference."""
+    """Replace the process-wide blocklist singleton with a temporary one."""
     from backend.dns.blocklists import BlocklistManager
 
     fresh = BlocklistManager(tmp_path / "blocklist.txt")
@@ -83,17 +73,17 @@ def patched_blocklists(monkeypatch, tmp_path):
 
 @pytest.fixture
 def app(patched_db):
-    """A bare FastAPI app with only the API + WebSocket routers -- NOT
-    `backend.main.app`, whose real lifespan would run a live ARP/mDNS/SSDP
-    discovery pass and write a real backup file on startup."""
+    """A test app with the real API, WebSocket, and security middleware."""
     from fastapi import FastAPI
 
     from backend.api.routes import router as api_router
     from backend.api.websocket import router as websocket_router
+    from backend.security import ApplianceSecurityMiddleware
 
     test_app = FastAPI()
     test_app.include_router(api_router)
     test_app.include_router(websocket_router)
+    test_app.add_middleware(ApplianceSecurityMiddleware)
     return test_app
 
 
@@ -120,12 +110,7 @@ def auth_headers(auth_token):
 
 
 class FakeSocket:
-    """A minimal stand-in for `socket.socket` used by port/SSDP/ARP tests.
-
-    `connect_ex_results` maps (host, port) -> return code for `connect_ex`;
-    `recv_queue` is a list of (data, addr) tuples consumed in order by
-    `recvfrom`, raising `socket.timeout` once exhausted.
-    """
+    """A minimal stand-in for socket.socket used by discovery tests."""
 
     def __init__(self, connect_ex_results=None, recv_queue=None, sendto_raises=None):
         self.connect_ex_results = connect_ex_results or {}
@@ -170,7 +155,7 @@ def fake_socket_factory():
 
 
 def fake_subprocess_run(returncode=0, stdout="", stderr=""):
-    """Build a callable usable as a `subprocess.run` monkeypatch target."""
+    """Build a callable usable as a subprocess.run monkeypatch target."""
     import subprocess
 
     def _run(*args, **kwargs):
@@ -186,8 +171,7 @@ def make_subprocess_run():
 
 @pytest.fixture
 def smtp_mock():
-    """A MagicMock standing in for `smtplib.SMTP`, configured so its
-    `with smtplib.SMTP(...) as server:` context-manager usage works."""
+    """A context-manager-compatible smtplib.SMTP mock."""
     from unittest.mock import MagicMock
 
     instance = MagicMock()
