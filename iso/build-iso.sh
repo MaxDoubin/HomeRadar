@@ -20,21 +20,21 @@ for arch in amd64 i386; do
   lb clean
   lb config \
     --distribution bookworm \
-    --architectures ${arch} \
+    --architectures "${arch}" \
     --binary-images iso-hybrid \
     --debian-installer live \
     --archive-areas "main contrib non-free-firmware" \
     --bootappend-live "boot=live components quiet splash"
 
   lb build
-  if [[ -f live-image-${arch}.hybrid.iso ]]; then
-    mv live-image-${arch}.hybrid.iso ${iso_root}/live-image-${arch}.hybrid.iso.new
+  if [[ -f "live-image-${arch}.hybrid.iso" ]]; then
+    mv "live-image-${arch}.hybrid.iso" "${iso_root}/live-image-${arch}.hybrid.iso.new"
   fi
 done
 
 for arch in amd64 i386; do
-  if [[ -f ${iso_root}/live-image-${arch}.hybrid.iso.new ]]; then
-    mv ${iso_root}/live-image-${arch}.hybrid.iso.new ${iso_root}/live-image-${arch}.hybrid.iso
+  if [[ -f "${iso_root}/live-image-${arch}.hybrid.iso.new" ]]; then
+    mv "${iso_root}/live-image-${arch}.hybrid.iso.new" "${iso_root}/live-image-${arch}.hybrid.iso"
     echo "ISO created: ${iso_root}/live-image-${arch}.hybrid.iso"
   fi
 done
