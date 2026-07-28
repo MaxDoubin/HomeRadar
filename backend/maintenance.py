@@ -10,6 +10,13 @@ from pathlib import Path
 from backend import config
 
 _BACKUP_NAME = re.compile(r"^homeradar-\d{8}T\d{6}(?:\d{6})?Z\.db$")
+_SECRET_SETTING_KEYS = (
+    "pairing_token",
+    "pairing_code",
+    "pairing_code_expires_at",
+    "pairing_fail_count",
+    "pairing_locked_until",
+)
 
 
 def create_backup(
@@ -19,9 +26,21 @@ def create_backup(
     backup_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     target = backup_dir / f"homeradar-{timestamp}.db"
-    with sqlite3.connect(source_path) as source, sqlite3.connect(target) as destination:
-        source.backup(destination)
-        check = destination.execute("PRAGMA quick_check").fetchone()[0]
+    try:
+        with sqlite3.connect(source_path, timeout=30) as source, sqlite3.connect(
+            target, timeout=30
+        ) as destination:
+            source.backup(destination)
+            placeholders = ",".join("?" for _ in _SECRET_SETTING_KEYS)
+            destination.execute(
+                f"DELETE FROM settings WHERE key IN ({placeholders})",
+                _SECRET_SETTING_KEYS,
+            )
+            destination.commit()
+            check = destination.execute("PRAGMA quick_check").fetchone()[0]
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
     if check != "ok":
         target.unlink(missing_ok=True)
         raise RuntimeError(f"backup integrity check failed: {check}")
