@@ -63,7 +63,7 @@ class FakeDNSProxy:
         self._stop_evt = threading.Event()
         self._ready_evt = threading.Event()
         self.stopped = False
-        FakeDNSProxy.instances.append(self)
+        type(self).instances.append(self)
 
     def serve_forever(self):
         self._ready_evt.set()
