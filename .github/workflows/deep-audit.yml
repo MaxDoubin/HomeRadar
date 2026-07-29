@@ -180,7 +180,7 @@ jobs:
         working-directory: desktop
         run: npm test
       - name: Install ESLint audit dependencies
-        run: npm install --no-save eslint@9 @eslint/js globals eslint-plugin-react
+        run: npm install --no-save eslint@9 @eslint/js@9 globals eslint-plugin-react
       - name: Lint frontend and desktop JavaScript
         shell: bash
         run: |
