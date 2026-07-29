@@ -1,0 +1,19 @@
+{
+  "name": "Home Radar",
+  "short_name": "HomeRadar",
+  "description": "Local network security dashboard — discovers devices, filters DNS threats, and explains what needs attention.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui", "browser"],
+  "background_color": "#06100e",
+  "theme_color": "#071412",
+  "orientation": "any",
+  "categories": ["security", "utilities"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
