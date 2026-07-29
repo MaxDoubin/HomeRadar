@@ -1,20 +1,22 @@
 """REST API for inventory, security operations, traffic, settings, and digests."""
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException
+import ipaddress
+import json
+from datetime import time as clock_time
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 
 from backend import config
 from backend import pairing
+from backend import services
 from backend.alerts.email_digest import build_digest, send_digest
 from backend.db import get_conn, models
 from backend.discovery.scan_runner import run_discovery_scan
-from backend.dns.blocklists import record_update_results
-from backend.monitor.traffic_analyzer import record_connection
-from backend.monitor.cisa_kev import search_catalog, update_catalog
-from backend.monitor.exposure_audit import audit_all, audit_device
-from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
+from backend.dns.blocklists import normalize_domain, record_update_results
 from backend.maintenance import (
     backup_path,
     create_backup,
@@ -22,11 +24,56 @@ from backend.maintenance import (
     list_backups,
     prune_backups,
 )
+from backend.monitor.cisa_kev import search_catalog, update_catalog
+from backend.monitor.exposure_audit import audit_all, audit_device
+from backend.monitor.traffic_analyzer import record_connection
+from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
 from backend.pairing import require_token
 from backend.services import blocklists
-from backend import services
 
 router = APIRouter()
+
+
+def _normalize_dns_upstreams(value: str) -> str:
+    candidates = [item.strip() for item in value.split(",") if item.strip()]
+    if not candidates:
+        raise ValueError("At least one DNS upstream IP address is required")
+    normalized: list[str] = []
+    for candidate in candidates:
+        try:
+            address = str(ipaddress.ip_address(candidate))
+        except ValueError as exc:
+            raise ValueError(f"Invalid DNS upstream IP address: {candidate}") from exc
+        if address not in normalized:
+            normalized.append(address)
+    return ",".join(normalized)
+
+
+def _normalize_custom_dns_records(value: str) -> str:
+    if not value.strip():
+        return "{}"
+    try:
+        records = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Custom DNS records must be a valid JSON object") from exc
+    if not isinstance(records, dict):
+        raise ValueError("Custom DNS records must be a JSON object")
+    if len(records) > 500:
+        raise ValueError("Custom DNS records cannot contain more than 500 entries")
+
+    normalized: dict[str, str] = {}
+    for raw_domain, raw_address in records.items():
+        if not isinstance(raw_domain, str) or not isinstance(raw_address, str):
+            raise ValueError("Custom DNS record names and addresses must be strings")
+        domain = normalize_domain(raw_domain)
+        if domain is None:
+            raise ValueError(f"Invalid custom DNS domain: {raw_domain}")
+        try:
+            address = str(ipaddress.ip_address(raw_address.strip()))
+        except ValueError as exc:
+            raise ValueError(f"Invalid custom DNS address for {raw_domain}") from exc
+        normalized[domain] = address
+    return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
 
 
 class AuthorizationUpdate(BaseModel):
@@ -38,11 +85,21 @@ class AlertUpdate(BaseModel):
 
 
 class SettingsUpdate(BaseModel):
-    household_name: str | None = Field(default=None, max_length=120)
+    household_name: str | None = Field(default=None, min_length=1, max_length=120)
     digest_email: str | None = Field(default=None, max_length=320)
-    dns_upstream: str | None = Field(default=None, max_length=255)
+    dns_upstream: str | None = Field(default=None, min_length=1, max_length=255)
     notifications_enabled: bool | None = None
-    custom_dns_records: str | None = Field(default=None)
+    custom_dns_records: str | None = Field(default=None, max_length=65_536)
+
+    @field_validator("dns_upstream")
+    @classmethod
+    def validate_dns_upstream(cls, value: str | None) -> str | None:
+        return None if value is None else _normalize_dns_upstreams(value)
+
+    @field_validator("custom_dns_records")
+    @classmethod
+    def validate_custom_dns_records(cls, value: str | None) -> str | None:
+        return None if value is None else _normalize_custom_dns_records(value)
 
 
 class ConnectionObservation(BaseModel):
@@ -51,24 +108,59 @@ class ConnectionObservation(BaseModel):
     bytes_sent: int = Field(default=0, ge=0)
     bytes_received: int = Field(default=0, ge=0)
 
+    @field_validator("source_ip", "destination_ip")
+    @classmethod
+    def validate_ip_address(cls, value: str) -> str:
+        try:
+            return str(ipaddress.ip_address(value.strip()))
+        except ValueError as exc:
+            raise ValueError("A valid IPv4 or IPv6 address is required") from exc
+
 
 class SetupRequest(BaseModel):
     household_name: str = Field(min_length=1, max_length=120)
     digest_email: str = Field(default="", max_length=320)
-    dns_upstream: str = Field(default="1.1.1.1", max_length=255)
+    dns_upstream: str = Field(default="1.1.1.1", min_length=1, max_length=255)
     notifications_enabled: bool = True
+
+    @field_validator("dns_upstream")
+    @classmethod
+    def validate_dns_upstream(cls, value: str) -> str:
+        return _normalize_dns_upstreams(value)
 
 
 class PairClaimRequest(BaseModel):
-    code: str = Field(min_length=1, max_length=16)
+    code: str = Field(pattern=r"^\d{6}$")
 
 
 class DevicePolicyUpdate(BaseModel):
     internet_enabled: bool = True
-    block_start: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
-    block_end: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
+    block_start: str | None = None
+    block_end: str | None = None
     blocked_domains: list[str] = Field(default_factory=list, max_length=500)
     allowed_domains: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("block_start", "block_end")
+    @classmethod
+    def validate_schedule_time(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            return clock_time.fromisoformat(value).isoformat()
+        except ValueError as exc:
+            raise ValueError("Schedule times must be valid ISO times such as 22:30") from exc
+
+    @field_validator("blocked_domains", "allowed_domains")
+    @classmethod
+    def validate_domains(cls, values: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for value in values:
+            domain = normalize_domain(value)
+            if domain is None:
+                raise ValueError(f"Invalid domain rule: {value}")
+            if domain not in normalized:
+                normalized.append(domain)
+        return normalized
 
 
 @router.get("/status")
@@ -140,7 +232,10 @@ def update_device_authorization(device_id: int, update: AuthorizationUpdate):
 
 
 @router.get("/devices/{device_id}/traffic")
-def get_device_traffic(device_id: int, limit: int = 200):
+def get_device_traffic(
+    device_id: int,
+    limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+):
     with get_conn() as conn:
         if models.get_device(conn, device_id) is None:
             raise HTTPException(status_code=404, detail="Device not found")
@@ -211,13 +306,16 @@ def update_alert(alert_id: int, update: AlertUpdate):
 
 
 @router.get("/traffic")
-def get_traffic(device_id: int | None = None, limit: int = 200):
+def get_traffic(
+    device_id: int | None = None,
+    limit: Annotated[int, Query(ge=1, le=1_000)] = 200,
+):
     with get_conn() as conn:
         return models.list_traffic(conn, device_id=device_id, limit=limit)
 
 
 @router.get("/traffic/summary")
-def get_traffic_summary(hours: int = 24):
+def get_traffic_summary(hours: Annotated[int, Query(ge=1, le=8_760)] = 24):
     with get_conn() as conn:
         return models.traffic_summary(conn, hours=hours)
 
@@ -261,9 +359,8 @@ def run_exposure_audit():
 def get_blocklist_status():
     with get_conn() as conn:
         sources = [
-            dict(row) for row in conn.execute(
-                "SELECT * FROM blocklist_metadata ORDER BY source"
-            ).fetchall()
+            dict(row)
+            for row in conn.execute("SELECT * FROM blocklist_metadata ORDER BY source").fetchall()
         ]
     return {"domain_count": blocklists.count, "path": str(blocklists.path), "sources": sources}
 
@@ -272,7 +369,8 @@ def get_blocklist_status():
 def get_dns_stats():
     if services.dns_proxy is None:
         return {"running": False, "cache": {}, "upstreams": {}}
-    return {"running": True, **services.dns_proxy.stats()}
+    stats = services.dns_proxy.stats()
+    return {"running": bool(stats.get("running", True)), **stats}
 
 
 @router.post("/dns/cache/clear", dependencies=[Depends(require_token)])
@@ -295,7 +393,10 @@ def update_blocklists():
 
 
 @router.get("/threat-intel/cisa-kev")
-def get_cisa_kev(query: str = "", limit: int = 100):
+def get_cisa_kev(
+    query: Annotated[str, Query(max_length=200)] = "",
+    limit: Annotated[int, Query(ge=1, le=1_000)] = 100,
+):
     with get_conn() as conn:
         return search_catalog(conn, query=query, limit=limit)
 
