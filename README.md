@@ -36,6 +36,12 @@ The links below always point to the newest successful build from `main`.
 
 > **Desktop application or full appliance?** The Windows, macOS, and Linux desktop applications are the easiest way to explore Home Radar locally. For always-on household DNS protection, LAN-wide discovery, and an appliance other devices can connect to, use the Docker or dedicated-Linux installation below.
 
+### Or skip the download entirely: install it from the browser
+
+Every running appliance also serves itself as an installable **Progressive Web App** — no download, no certificate, no app store. Open the dashboard's own address (e.g. `http://<appliance-ip>:8000`) in Chrome, Edge, or Safari and use the browser's **Install app** / **Add to Home Screen** option. The app shell keeps working offline once installed, though live data still needs a network connection to the appliance. This is an additional way to run the dashboard, not a replacement for any of the downloads above.
+
+Service worker registration (and therefore installability/offline support) requires a secure browsing context — HTTPS, or `http://localhost`. It silently does nothing on a plain `http://<lan-ip>:8000` address, which is how most households reach their appliance; the dashboard itself works identically either way, with or without the installable layer.
+
 ### First launch notes
 
 Home Radar builds are currently open-source community builds and are not yet signed with commercial Apple or Microsoft certificates.
@@ -117,6 +123,7 @@ Network history and device inventory stay in the appliance's local SQLite databa
 ## Included features
 
 - Responsive React dashboard with overview, device inventory, topology map, traffic, alerts, settings, backups, pairing, and first-run setup
+- Installable Progressive Web App served directly by the appliance — browser-only install with no certificates or app stores, plus offline app-shell caching
 - Native Windows, macOS Intel, macOS Apple Silicon, Linux, Android, and iOS companion code
 - Local DNS firewall with blocklists, custom records, caching, TCP fallback, and multiple upstream resolvers
 - Multi-signal device fingerprinting with confidence and evidence
@@ -212,7 +219,7 @@ cd mobile/android
 gradle :core:test :app:assembleDebug
 ```
 
-Every pull request runs backend tests on Python 3.11 and 3.12, frontend tests and production build, Electron syntax validation, Android tests and APK compilation, and a complete Docker build.
+Every pull request runs backend tests on Python 3.11 and 3.12, frontend tests and production build, Electron syntax validation, Android tests and APK compilation, iOS static analysis and a simulator build, and a complete Docker build — plus a separate security/quality pipeline covering CodeQL, Ruff, Mypy, Bandit, `pip-audit`/`npm audit`, ESLint, and shell/Dockerfile/secret scanning. A third workflow packages full, installable desktop builds for Windows, macOS (Intel and Apple Silicon), and Linux on every pull request too, ahead of publishing them from `main`.
 
 ---
 
