@@ -19,6 +19,22 @@ The desktop application binds only to `127.0.0.1`, stores data in the operating 
 
 The public builds are not yet commercially code-signed. Verify the checksum before bypassing an Apple Gatekeeper or Microsoft SmartScreen warning.
 
+## Progressive Web App (no download)
+
+Any running appliance also serves itself as an installable Progressive Web App at its
+own dashboard address. Open that address in Chrome, Edge, or Safari and use the
+browser's **Install app** / **Add to Home Screen** option — no download, certificate, or
+app store required. The static app shell (HTML/JS/CSS/icons) is cached for offline use;
+live device, alert, and traffic data still require a network connection to the
+appliance.
+
+Service worker registration only happens in a secure browsing context (HTTPS, or
+`http://localhost`), per the Service Worker specification. It is a silent no-op on a
+plain `http://<lan-ip>:8000` address — the common way to reach a household appliance —
+so installability and offline caching are unavailable there today, but the dashboard
+itself works exactly the same either way. Reverse-proxying the appliance behind HTTPS is
+the way to unlock installability on a LAN address.
+
 ## Docker Compose appliance
 
 Requirements: Linux, Docker Engine, and the Compose plugin.

@@ -24,7 +24,7 @@ If applicable, add screenshots to help explain your problem.
 
 **Environment (please complete the following information):**
  - OS: [e.g. Ubuntu 22.04, Debian 12]
- - Installation Method: [e.g. Docker, ISO, Manual]
+ - Installation Method: [e.g. Docker, ISO, Manual, Desktop app, PWA/Browser install]
  - Browser (if applicable): [e.g. chrome, safari]
  - Version: [e.g. v1.0.0 or commit hash]
 
