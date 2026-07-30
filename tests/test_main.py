@@ -59,16 +59,50 @@ class FakeDNSProxy:
 
     def __init__(self, blocklists_manager):
         self.blocklists = blocklists_manager
+        self.address = ("127.0.0.1", 53)
         self._stop_evt = threading.Event()
+        self._ready_evt = threading.Event()
         self.stopped = False
-        FakeDNSProxy.instances.append(self)
+        type(self).instances.append(self)
 
     def serve_forever(self):
+        self._ready_evt.set()
         self._stop_evt.wait(timeout=5)
+
+    def wait_until_ready(self, timeout=5.0):
+        return self._ready_evt.wait(timeout=timeout)
+
+    def stats(self):
+        return {
+            "running": self._ready_evt.is_set() and not self.stopped,
+            "listeners": {"udp": True, "tcp": True, "errors": {}},
+            "cache": {},
+            "upstreams": {},
+        }
 
     def stop(self):
         self.stopped = True
         self._stop_evt.set()
+
+
+class FailingDNSProxy(FakeDNSProxy):
+    def serve_forever(self):
+        return
+
+    def wait_until_ready(self, timeout=5.0):
+        return False
+
+    def stats(self):
+        return {
+            "running": False,
+            "listeners": {
+                "udp": False,
+                "tcp": False,
+                "errors": {"udp": "OSError: address already in use"},
+            },
+            "cache": {},
+            "upstreams": {},
+        }
 
 
 def test_lifespan_starts_and_stops_dns_proxy_when_enabled(monkeypatch, patched_db):
@@ -86,6 +120,22 @@ def test_lifespan_starts_and_stops_dns_proxy_when_enabled(monkeypatch, patched_d
 
     assert services.dns_proxy is None
     assert FakeDNSProxy.instances[0].stopped is True
+
+
+def test_lifespan_fails_when_configured_dns_listener_cannot_start(monkeypatch, patched_db):
+    _stub_all_background_loops(monkeypatch)
+    monkeypatch.setattr(config, "DNS_ENABLED", True)
+    monkeypatch.setattr(config, "TRAFFIC_MONITOR_ENABLED", False)
+    monkeypatch.setattr(main, "DNSProxy", FailingDNSProxy)
+    FailingDNSProxy.instances = []
+    services.dns_proxy = None
+
+    with pytest.raises(RuntimeError, match="DNS proxy failed to start"):
+        with TestClient(main.app):
+            pass
+
+    assert services.dns_proxy is None
+    assert FailingDNSProxy.instances[0].stopped is True
 
 
 # ---------------------------------------------------------------------------
