@@ -1,6 +1,8 @@
 """REST API for inventory, security operations, traffic, settings, and digests."""
 from __future__ import annotations
 
+import random
+
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
@@ -61,6 +63,10 @@ class SetupRequest(BaseModel):
 
 class PairClaimRequest(BaseModel):
     code: str = Field(min_length=1, max_length=16)
+
+
+class DemoAttackRequest(BaseModel):
+    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns)$")
 
 
 class DevicePolicyUpdate(BaseModel):
@@ -145,6 +151,15 @@ def get_device_traffic(device_id: int, limit: int = 200):
         if models.get_device(conn, device_id) is None:
             raise HTTPException(status_code=404, detail="Device not found")
         return models.list_traffic(conn, device_id=device_id, limit=limit)
+
+
+@router.get("/devices/{device_id}/traffic/timeseries")
+def get_device_traffic_timeseries(device_id: int, hours: int = 24):
+    """Hourly bandwidth buckets for the Devices page sparkline."""
+    with get_conn() as conn:
+        if models.get_device(conn, device_id) is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {"hours": hours, "buckets": models.device_bandwidth_timeseries(conn, device_id, hours=hours)}
 
 
 @router.get("/devices/{device_id}/trust")
@@ -451,3 +466,58 @@ def regenerate_pairing_token():
     token so a stranger can't lock the household out of their own appliance."""
     with get_conn() as conn:
         return {"token": pairing.regenerate_token(conn)}
+
+
+@router.post("/demo/simulate-attack", dependencies=[Depends(require_token)])
+def simulate_demo_attack(request: DemoAttackRequest):
+    """Injects one clearly-labeled synthetic security event through the same
+    create_alert/log_traffic code paths a real detection would use, so a demo
+    audience sees the exact dashboard experience a genuine attack produces --
+    without needing real attack traffic. Only available when the operator has
+    explicitly set HOMERADAR_DEMO_MODE=true; a real appliance should never be
+    able to fabricate its own alerts."""
+    if not config.DEMO_MODE_ENABLED:
+        raise HTTPException(status_code=404, detail="Not found")
+    with get_conn() as conn:
+        device = conn.execute(
+            "SELECT id, ip, mac FROM devices ORDER BY last_seen DESC LIMIT 1"
+        ).fetchone()
+        device_id = device["id"] if device else None
+
+        if request.kind == "malicious_dns":
+            fake_ip = f"203.0.113.{random.randint(2, 254)}"  # RFC 5737 TEST-NET-3
+            models.log_traffic(
+                conn,
+                device_id=device_id,
+                dest_ip=fake_ip,
+                was_blocked=True,
+                threat_level="critical",
+                threat_reason="Simulated for demonstration",
+                query_type="A",
+            )
+            source = device["ip"] if device else "a device on your network"
+            alert_id = models.create_alert(
+                conn,
+                device_id=device_id,
+                severity="critical",
+                title=f"Suspicious connection: {fake_ip}",
+                description=(
+                    f"{source} contacted {fake_ip}; demo confidence 98%. "
+                    "(Simulated for demonstration -- no real threat-intel lookup "
+                    "was performed.)"
+                ),
+            )
+        else:
+            fake_mac = device["mac"] if device else "aa:bb:cc:dd:ee:ff"
+            alert_id = models.create_alert(
+                conn,
+                device_id=device_id,
+                severity="critical",
+                title="Wi-Fi Deauthentication Attack Detected",
+                description=(
+                    f"Detected 14 deauth frames from MAC {fake_mac}. This may be a "
+                    "Flipper Zero or similar tool attempting to disconnect devices. "
+                    "(Simulated for demonstration.)"
+                ),
+            )
+    return {"alert_id": alert_id, "kind": request.kind}

@@ -93,6 +93,13 @@ CISA_KEV_URL = os.environ.get(
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
 )
 
+# Demo mode: exposes POST /demo/simulate-attack, which injects a clearly-labeled
+# synthetic alert (and, for the malicious-connection kind, a traffic_logs row)
+# through the exact same create_alert/log_traffic code paths a real detection
+# would use. Off by default -- a real appliance should never expose a button
+# that fabricates security events.
+DEMO_MODE_ENABLED = os.environ.get("HOMERADAR_DEMO_MODE", "false").lower() in {"1", "true", "yes"}
+
 # Household and digest settings
 HOUSEHOLD_NAME = os.environ.get("HOMERADAR_HOUSEHOLD_NAME", "My Home")
 PUBLIC_BASE_URL = os.environ.get("HOMERADAR_PUBLIC_URL", "http://homeradar.local:8000")

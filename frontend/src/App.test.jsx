@@ -344,8 +344,8 @@ describe("Alert browser-notification diffing", () => {
   });
 
   it("does not re-notify for already-seen alerts; only genuinely new ones trigger a Notification", async () => {
-    // Use an initially-empty-alerts dashboard fixture to isolate this scenario from the
-    // initial /dashboard load's own alerts (see note below on the real, verified behavior).
+    // Start from an initially-empty-alerts dashboard so the first socket snapshot below
+    // is unambiguously "genuinely new", not pre-existing data from the initial load.
     mocks.api.mockImplementation((path, options = {}) => {
       if (path === "/dashboard") return Promise.resolve({ status: {}, devices: [], alerts: [], traffic: {} });
       return defaultApiImpl(path, options);
@@ -355,17 +355,6 @@ describe("Alert browser-notification diffing", () => {
     expect(typeof snapshotCallback).toBe("function");
     expect(notifications).toHaveLength(0);
 
-    // NOTE ON REAL, VERIFIED BEHAVIOR: App.jsx's `alertsInitialized` ref is flipped to
-    // `true` during the component's very first mount-time effect run, which executes
-    // synchronously over the pristine, empty initial `data.alerts` - strictly before the
-    // initial /dashboard load or any socket snapshot can deliver real data. As a result,
-    // the very first *real* batch of alerts to arrive (whether from the initial dashboard
-    // load or the first socket snapshot) is NOT silently absorbed as a baseline the way the
-    // adjacent code comment might suggest - it already triggers notifications for every
-    // alert it contains. We verified this with an isolated repro before writing this test.
-    // What IS true, and what matters most for correctness, is de-duplication: an alert id
-    // already seen does not get re-notified when it reappears in a later snapshot - only
-    // genuinely new ids do. That is what this test asserts.
     act(() => {
       snapshotCallback({ type: "snapshot", alerts: [alertOpen1] });
     });
@@ -379,6 +368,24 @@ describe("Alert browser-notification diffing", () => {
     expect(notifications[1].title).toContain(alertOpen2.title);
     // the previously-seen alert was not re-notified
     expect(notifications.filter((n) => n.title.includes(alertOpen1.title))).toHaveLength(1);
+  });
+
+  it("does not notify for alerts that already existed on the very first real dashboard load", async () => {
+    // Regression guard: `data`'s initial useState value is a placeholder (alerts left
+    // undefined) specifically so the alert-tracking effect can tell "no real data yet"
+    // apart from "loaded, and there happen to be zero alerts". Before that guard existed,
+    // the effect ran once against the pristine placeholder and flipped its "seen before"
+    // flag to true before any real fetch/socket data ever arrived -- so the very first
+    // real batch of alerts (pre-existing ones, on a household's first-ever page load)
+    // was wrongly treated as "new" and fired a Notification for every one of them.
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/dashboard") return Promise.resolve(clone(dashboardFixture));
+      return defaultApiImpl(path, options);
+    });
+
+    await renderApp();
+    await screen.findByText(alertOpen1.title);
+    expect(notifications).toHaveLength(0);
   });
 });
 
@@ -419,5 +426,99 @@ describe("Settings pairing panel", () => {
     await waitFor(() => {
       expect(mocks.setStoredToken).toHaveBeenCalledWith("new-token-xyz");
     });
+  });
+});
+
+// ---- Simulate-attack demo panel -------------------------------------------
+
+describe("Settings simulate-attack panel", () => {
+  async function openSettings() {
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /settings/i }));
+    await screen.findByRole("button", { name: /save settings/i });
+    return user;
+  }
+
+  it("POSTs /demo/simulate-attack with kind=deauth and reloads the dashboard", async () => {
+    const user = await openSettings();
+    const dashboardCallsBefore = mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length;
+
+    await user.click(screen.getByRole("button", { name: /simulate wi-fi deauth attack/i }));
+
+    await waitFor(() => {
+      const call = mocks.api.mock.calls.find((c) => c[0] === "/demo/simulate-attack");
+      expect(call).toBeTruthy();
+      expect(call[1].method).toBe("POST");
+      expect(JSON.parse(call[1].body)).toEqual({ kind: "deauth" });
+    });
+
+    await waitFor(() => expect(screen.getByText(/alert triggered/i)).toBeInTheDocument());
+    const dashboardCallsAfter = mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length;
+    expect(dashboardCallsAfter).toBeGreaterThan(dashboardCallsBefore);
+  });
+
+  it("POSTs /demo/simulate-attack with kind=malicious_dns for the other button", async () => {
+    const user = await openSettings();
+
+    await user.click(screen.getByRole("button", { name: /simulate malicious connection/i }));
+
+    await waitFor(() => {
+      const call = mocks.api.mock.calls.find((c) => c[0] === "/demo/simulate-attack");
+      expect(JSON.parse(call[1].body)).toEqual({ kind: "malicious_dns" });
+    });
+  });
+
+  it("shows a friendly message when the backend has demo mode disabled (404)", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/demo/simulate-attack") {
+        const error = new Error("Not found");
+        error.status = 404;
+        return Promise.reject(error);
+      }
+      return defaultApiImpl(path, options);
+    });
+    const user = await openSettings();
+
+    await user.click(screen.getByRole("button", { name: /simulate wi-fi deauth attack/i }));
+
+    await screen.findByText(/demo mode isn't enabled on this appliance/i);
+  });
+});
+
+// ---- Per-device bandwidth sparkline ----------------------------------------
+
+describe("Devices bandwidth sparkline", () => {
+  it("fetches the per-device timeseries and renders a sparkline when there is traffic", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === `/devices/${deviceTrusted.id}/traffic/timeseries?hours=24`) {
+        return Promise.resolve({
+          hours: 24,
+          buckets: [
+            { bucket: "2026-01-01T00:00:00Z", bytes_sent: 100, bytes_received: 200 },
+            { bucket: "2026-01-01T01:00:00Z", bytes_sent: 300, bytes_received: 400 },
+          ],
+        });
+      }
+      if (path === `/devices/${devicePending.id}/traffic/timeseries?hours=24`) {
+        return Promise.resolve({ hours: 24, buckets: [] });
+      }
+      return defaultApiImpl(path, options);
+    });
+
+    const { container } = await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /devices/i }));
+    await screen.findByRole("button", { name: /^scan network$/i });
+
+    await waitFor(() => {
+      expect(
+        mocks.api.mock.calls.some((c) => c[0] === `/devices/${deviceTrusted.id}/traffic/timeseries?hours=24`),
+      ).toBe(true);
+    });
+
+    const panel = container.querySelector(".devices-panel.full");
+    await waitFor(() => expect(panel.querySelector(".sparkline")).toBeTruthy());
+    expect(within(panel).getByText(/no traffic/i)).toBeInTheDocument();
   });
 });

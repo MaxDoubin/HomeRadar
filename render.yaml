@@ -1,0 +1,30 @@
+# Optional one-click config for hosting a public, judge-facing Home Radar demo
+# on Render's free tier (https://render.com). This is for presentations only --
+# it is NOT how Home Radar is meant to run day to day. A cloud container has no
+# home LAN to discover or protect, so ARP/mDNS/SSDP discovery and the DNS proxy
+# simply find nothing there; the dashboard, alerts, trust scoring, and the
+# HOMERADAR_DEMO_MODE attack simulator all work normally regardless.
+#
+# To use: create a free Render account, choose "New +" -> "Blueprint", point it
+# at this repository, and Render reads this file automatically. No other setup
+# is required. This file changes nothing about the Docker/native/desktop
+# install paths described in README.md and docs/INSTALL.md.
+services:
+  - type: web
+    name: homeradar-demo
+    runtime: docker
+    dockerfilePath: docker/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: HOMERADAR_DEMO_MODE
+        value: "true"
+      - key: HOMERADAR_HOUSEHOLD_NAME
+        value: "Home Radar Demo"
+      - key: HOMERADAR_DNS_ENABLED
+        value: "false"
+    disk:
+      name: homeradar-demo-data
+      mountPath: /data
+      sizeGB: 1

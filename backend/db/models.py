@@ -339,6 +339,23 @@ def traffic_summary(conn, hours: int = 24) -> dict:
     return {**dict(totals), "top_domains": top_domains, "timeline": timeline, "hours": hours}
 
 
+def device_bandwidth_timeseries(conn, device_id: int, hours: int = 24) -> list[dict]:
+    """Hourly bytes_sent/bytes_received buckets for one device, oldest first --
+    feeds the per-device bandwidth sparkline on the Devices page."""
+    hours = max(1, min(hours, 24 * 30))
+    return [
+        dict(row) for row in conn.execute(
+            """SELECT strftime('%Y-%m-%dT%H:00:00Z', created_at) AS bucket,
+                      COALESCE(SUM(bytes_sent), 0) AS bytes_sent,
+                      COALESCE(SUM(bytes_received), 0) AS bytes_received
+               FROM traffic_logs
+               WHERE device_id = ? AND julianday(created_at) >= julianday('now', ?)
+               GROUP BY bucket ORDER BY bucket""",
+            (device_id, f"-{hours} hours"),
+        ).fetchall()
+    ]
+
+
 def set_trust_score(conn, device_id: int, score: int, reason: str) -> None:
     score = max(0, min(100, int(score)))
     current = conn.execute(
