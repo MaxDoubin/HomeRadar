@@ -8,7 +8,7 @@
 Every American family has an old laptop collecting dust. Meanwhile, home networks are
 completely invisible - families have no idea what devices are connected, what data is
 leaving their house, or whether they're exposed to threats. Home Radar turns that
-forgotten device into a free, enterprise-grade network security appliance. Download,
+forgotten device into a free, enterprise-inspired home-network security appliance. Download,
 flash, plug in, protected.
 
 **Cost to the family: $0.**
@@ -53,12 +53,12 @@ flash, plug in, protected.
 - [x] ML anomaly detection (Isolation Forest or Autoencoder) on traffic patterns to catch
   zero-day-style behavior without signature matching
 - [x] Per-device DNS internet pause, quiet-hour schedules, and custom domain rules
-- Bandwidth usage monitoring per device
+- [x] Bandwidth usage monitoring per device
 - [x] Non-invasive service exposure audit from observed ports (no credential attempts)
 - [x] Integration with Flipper Zero for live attack demo (deauth detection, rogue AP
   detection)
 - [x] Mobile companion apps (native iOS/SwiftUI and Android/Kotlin) for push notifications
-- Auto-update mechanism for blocklists and threat intel
+- [x] Auto-update mechanism for blocklists and threat intel
 
 ---
 
@@ -93,7 +93,7 @@ flash, plug in, protected.
 | **Packet Analysis** | scapy + pyshark for deep inspection |
 | **Threat Intel** | AbuseIPDB API, CISA KEV JSON feed, community blocklists |
 | **Database** | SQLite (local, zero-config, portable) |
-| **Dashboard Frontend** | React 18 + Tailwind CSS + Recharts |
+| **Dashboard Frontend** | React 19 + custom responsive CSS + hand-built SVG charts |
 | **Status Display** | Chromium kiosk mode on the appliance's own screen |
 | **Email Digest** | Python smtplib, Jinja2 templates |
 | **Process Management** | systemd services |
@@ -111,8 +111,9 @@ inline (no bridging, no breaking the network). It:
 4. This gives it visibility into every device's DNS queries (what domains they contact)
    plus Layer 2/3 traffic metadata
 
-This means zero risk of breaking the family's internet if Home Radar goes down - they
-just lose DNS for a moment and can switch back to the router's default.
+If Home Radar is the only DNS resolver distributed by the router and it goes down, name
+resolution can stop until the router configuration is rolled back. The original DNS
+settings must therefore be documented and a tested recovery plan kept available.
 
 ---
 
@@ -193,7 +194,8 @@ email.**
       but nice)
 - [ ] Test on multiple old machines (different specs, architectures)
 - [ ] Test on your home network for a full week in production mode
-- [ ] Write full README with screenshots, architecture diagram, install steps
+- [x] Write full README with architecture and install steps
+- [ ] Add final screenshots captured from validated hardware
 
 **Milestone: Anyone can download the ISO, flash it, and be running in under 10 minutes.**
 

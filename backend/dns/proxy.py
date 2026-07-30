@@ -94,6 +94,8 @@ class DNSProxy:
         self.upstream = upstream
         self.dynamic_upstream = dynamic_upstream
         self._stop = threading.Event()
+        self._udp_ready = threading.Event()
+        self._tcp_ready = threading.Event()
         self._socket: socket.socket | None = None
         self._tcp_socket: socket.socket | None = None
         self._tcp_thread: threading.Thread | None = None
@@ -101,35 +103,66 @@ class DNSProxy:
         self.cache = DNSCache(config.DNS_CACHE_SIZE, config.DNS_CACHE_MAX_TTL)
         self._upstream_stats: dict[str, dict] = {}
         self._stats_lock = threading.Lock()
+        self._startup_errors: dict[str, str] = {}
+        self._startup_lock = threading.Lock()
         self._inflight: dict[tuple, threading.Event] = {}
         self._inflight_lock = threading.Lock()
 
+    @property
+    def running(self) -> bool:
+        return self._udp_ready.is_set() and self._tcp_ready.is_set() and not self._stop.is_set()
+
+    def wait_until_ready(self, timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while time.monotonic() < deadline:
+            if self.running:
+                return True
+            with self._startup_lock:
+                if self._startup_errors:
+                    return False
+            time.sleep(0.02)
+        return self.running
+
+    def _record_listener_error(self, protocol: str, error: OSError) -> None:
+        with self._startup_lock:
+            self._startup_errors[protocol] = f"{type(error).__name__}: {error}"
+
     def serve_forever(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
-            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server.bind(self.address)
-            server.settimeout(0.5)
-            self._socket = server
-            self._tcp_thread = threading.Thread(
-                target=self._serve_tcp,
-                daemon=True,
-                name="homeradar-dns-tcp",
-            )
-            self._tcp_thread.start()
-            logger.info("DNS proxy listening on %s:%d over UDP and TCP", *self.address)
-            while not self._stop.is_set():
-                try:
-                    payload, client = server.recvfrom(4096)
-                except socket.timeout:
-                    continue
-                except OSError:
-                    if not self._stop.is_set():
-                        logger.exception("DNS listener failed")
-                    break
-                self._pool.submit(self._handle, payload, client)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(self.address)
+                server.settimeout(0.5)
+                self._socket = server
+                self._udp_ready.set()
+                self._tcp_thread = threading.Thread(
+                    target=self._serve_tcp,
+                    daemon=True,
+                    name="homeradar-dns-tcp",
+                )
+                self._tcp_thread.start()
+                logger.info("DNS proxy listening on %s:%d over UDP and TCP", *self.address)
+                while not self._stop.is_set():
+                    try:
+                        payload, client = server.recvfrom(4096)
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        if not self._stop.is_set():
+                            logger.exception("DNS UDP listener failed")
+                        break
+                    self._pool.submit(self._handle, payload, client)
+        except OSError as exc:
+            self._record_listener_error("udp", exc)
+            logger.exception("Could not start DNS UDP listener on %s:%d", *self.address)
+        finally:
+            self._udp_ready.clear()
+            self._socket = None
 
     def stop(self) -> None:
         self._stop.set()
+        self._udp_ready.clear()
+        self._tcp_ready.clear()
         if self._socket:
             self._socket.close()
         if self._tcp_socket:
@@ -245,7 +278,18 @@ class DNSProxy:
     def stats(self) -> dict:
         with self._stats_lock:
             upstreams = {key: dict(value) for key, value in self._upstream_stats.items()}
-        return {"cache": self.cache.stats(), "upstreams": upstreams}
+        with self._startup_lock:
+            errors = dict(self._startup_errors)
+        return {
+            "running": self.running,
+            "listeners": {
+                "udp": self._udp_ready.is_set(),
+                "tcp": self._tcp_ready.is_set(),
+                "errors": errors,
+            },
+            "cache": self.cache.stats(),
+            "upstreams": upstreams,
+        }
 
     def _check_custom_dns(self, payload: bytes, custom_records: str | None) -> bytes | None:
         if not custom_records:
@@ -376,20 +420,30 @@ class DNSProxy:
                 logger.debug("Could not return DNS response to %s", client[0], exc_info=True)
 
     def _serve_tcp(self) -> None:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server.bind(self.address)
-            server.listen(64)
-            server.settimeout(0.5)
-            self._tcp_socket = server
-            while not self._stop.is_set():
-                try:
-                    connection, client = server.accept()
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
-                self._pool.submit(self._handle_tcp, connection, client[0])
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                server.bind(self.address)
+                server.listen(64)
+                server.settimeout(0.5)
+                self._tcp_socket = server
+                self._tcp_ready.set()
+                while not self._stop.is_set():
+                    try:
+                        connection, client = server.accept()
+                    except socket.timeout:
+                        continue
+                    except OSError:
+                        if not self._stop.is_set():
+                            logger.exception("DNS TCP listener failed")
+                        break
+                    self._pool.submit(self._handle_tcp, connection, client[0])
+        except OSError as exc:
+            self._record_listener_error("tcp", exc)
+            logger.exception("Could not start DNS TCP listener on %s:%d", *self.address)
+        finally:
+            self._tcp_ready.clear()
+            self._tcp_socket = None
 
     def _handle_tcp(self, connection: socket.socket, client_ip: str) -> None:
         with connection:

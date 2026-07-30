@@ -111,24 +111,27 @@ async def lifespan(app: FastAPI):
     dns_thread: threading.Thread | None = None
     traffic_monitor: PassiveTrafficMonitor | None = None
     traffic_thread: threading.Thread | None = None
-    if config.DNS_ENABLED:
-        dns_proxy = DNSProxy(blocklists)
-        services.dns_proxy = dns_proxy
-        dns_thread = threading.Thread(
-            target=dns_proxy.serve_forever,
-            daemon=True,
-            name="homeradar-dns",
-        )
-        dns_thread.start()
-    if config.TRAFFIC_MONITOR_ENABLED:
-        traffic_monitor = PassiveTrafficMonitor()
-        traffic_thread = threading.Thread(
-            target=traffic_monitor.run,
-            daemon=True,
-            name="homeradar-traffic",
-        )
-        traffic_thread.start()
     try:
+        if config.DNS_ENABLED:
+            dns_proxy = DNSProxy(blocklists)
+            services.dns_proxy = dns_proxy
+            dns_thread = threading.Thread(
+                target=dns_proxy.serve_forever,
+                daemon=True,
+                name="homeradar-dns",
+            )
+            dns_thread.start()
+            if not await asyncio.to_thread(dns_proxy.wait_until_ready, 5.0):
+                details = dns_proxy.stats()["listeners"]["errors"]
+                raise RuntimeError(f"DNS proxy failed to start on {dns_proxy.address}: {details}")
+        if config.TRAFFIC_MONITOR_ENABLED:
+            traffic_monitor = PassiveTrafficMonitor()
+            traffic_thread = threading.Thread(
+                target=traffic_monitor.run,
+                daemon=True,
+                name="homeradar-traffic",
+            )
+            traffic_thread.start()
         yield
     finally:
         for task in tasks:
@@ -151,6 +154,7 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
+    openapi_url=None,
 )
 
 # Cross-origin access is disabled by default. The dashboard is served from this

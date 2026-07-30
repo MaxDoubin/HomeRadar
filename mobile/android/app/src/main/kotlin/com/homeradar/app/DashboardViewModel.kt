@@ -61,6 +61,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private var client: HomeRadarClient? = null
     private var socket: DashboardSocket? = null
     private var reconnectJob: Job? = null
+    private var snapshotJob: Job? = null
+    private var connectivityJob: Job? = null
 
     /** The last address we know is paired, kept even while the socket is torn down while backgrounded. */
     private var lastBaseUrl: String? = null
@@ -188,7 +190,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun observeSnapshots(socket: DashboardSocket) {
-        viewModelScope.launch {
+        snapshotJob?.cancel()
+        snapshotJob = viewModelScope.launch {
             socket.snapshots.collect { snapshot ->
                 if (snapshot != null) {
                     dashboardState.updateSnapshot(snapshot)
@@ -211,7 +214,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun observeConnectivity(socket: DashboardSocket) {
-        viewModelScope.launch {
+        connectivityJob?.cancel()
+        connectivityJob = viewModelScope.launch {
             socket.connected.collect { connected ->
                 _uiState.value = _uiState.value.copy(socketConnected = connected)
             }
@@ -221,6 +225,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private fun teardownSocket() {
         reconnectJob?.cancel()
         reconnectJob = null
+        snapshotJob?.cancel()
+        snapshotJob = null
+        connectivityJob?.cancel()
+        connectivityJob = null
         socket?.close()
         socket = null
         _uiState.value = _uiState.value.copy(socketConnected = false)
