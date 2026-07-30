@@ -194,6 +194,53 @@ describe("App navigation", () => {
   });
 });
 
+// ---- run scan feedback ------------------------------------------------
+// Regression guard: POST /scan used to be fired-and-forgotten with no catch
+// block at all, so a network/desktop-app scan that found 0 devices (or that
+// outright failed) looked identical to doing nothing -- no count, no error,
+// nothing on screen.
+
+describe("Run scan feedback", () => {
+  it("reports how many devices a scan found", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/scan") return Promise.resolve({ devices_found: 3, devices: [] });
+      return defaultApiImpl(path, options);
+    });
+    await renderApp();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^run scan$/i }));
+
+    await screen.findByText(/scan complete.*found 3 devices/i);
+  });
+
+  it("tells the user when a scan finds nothing, instead of looking like a no-op", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/scan") return Promise.resolve({ devices_found: 0, devices: [] });
+      return defaultApiImpl(path, options);
+    });
+    await renderApp();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^run scan$/i }));
+
+    await screen.findByText(/scan complete.*no devices responded/i);
+  });
+
+  it("surfaces a scan failure instead of swallowing it silently", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/scan") return Promise.reject(new Error("Backend unreachable"));
+      return defaultApiImpl(path, options);
+    });
+    await renderApp();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: /^run scan$/i }));
+
+    await screen.findByText(/scan failed: backend unreachable/i);
+  });
+});
+
 // ---- devices search filter ---------------------------------------------
 
 describe("Devices search filter", () => {

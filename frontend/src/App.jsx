@@ -501,6 +501,7 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [setupComplete, setSetupComplete] = useState(true);
   const [freshAlertIds, setFreshAlertIds] = useState(() => new Set());
+  const [scanMessage, setScanMessage] = useState("");
   const seenAlerts = useRef(new Set());
   const alertsInitialized = useRef(false);
   const load = () => api("/dashboard").then(setData).catch(() => setConnected(false));
@@ -544,7 +545,20 @@ export default function App() {
     }, 8000);
     return () => clearTimeout(timer);
   }, [data.alerts]);
-  const scan = async () => { setBusy(true); try { await api("/scan", {method:"POST"}); await load(); } finally { setBusy(false); } };
+  const scan = async () => {
+    setBusy(true);
+    setScanMessage("");
+    try {
+      const result = await api("/scan", { method: "POST" });
+      const count = result?.devices_found ?? 0;
+      setScanMessage(count > 0 ? `Scan complete — found ${count} device${count === 1 ? "" : "s"}.` : "Scan complete — no devices responded. This is expected for a desktop app without raw-network access; see docs/INSTALL.md for full LAN discovery.");
+      await load();
+    } catch (err) {
+      setScanMessage(`Scan failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
   const resolve = async (id) => { await api(`/alerts/${id}`, {method:"PATCH", body:JSON.stringify({resolved:true})}); await load(); };
   const title = useMemo(() => page === "Overview" ? "Command center" : page, [page]);
   return <div className="shell">
@@ -553,7 +567,7 @@ export default function App() {
       <nav>{NAV.map((item) => <button className={page === item ? "active" : ""} onClick={() => setPage(item)} key={item}><Icon name={item.toLowerCase()}/><span>{item}</span>{item === "Alerts" && data.alerts?.length > 0 && <b>{data.alerts.length}</b>}</button>)}</nav>
       <div className="appliance-status"><span><i className={connected ? "online" : ""}/>{connected ? "Appliance online" : "Reconnecting…"}</span><small>{data.status?.blocklist_domains || 0} blocked domains</small></div>
     </aside>
-    <main><header className="topbar"><span>{title}</span><div><button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{data.status?.security_score ?? 100}</span></div></header>
+    <main><header className="topbar"><span>{title}</span><div>{scanMessage && <span className={`scan-result ${scanMessage.startsWith("Scan failed") ? "danger" : ""}`}>{scanMessage}</span>}<button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{data.status?.security_score ?? 100}</span></div></header>
       <div className="content">
         {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected} freshAlertIds={freshAlertIds}/>}
         {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy}/>}
