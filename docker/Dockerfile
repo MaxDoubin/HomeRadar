@@ -37,8 +37,10 @@ ENV HOMERADAR_DB_PATH=/data/homeradar.db \
 
 VOLUME ["/data"]
 EXPOSE 53/udp 53/tcp 8000/tcp
+# hadolint ignore=DL3066
 USER homeradar
 
+# hadolint ignore=DL3025
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl --fail http://127.0.0.1:8000/health || exit 1
 

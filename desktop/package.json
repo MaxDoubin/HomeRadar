@@ -32,6 +32,7 @@
     "directories": {
       "output": "dist"
     },
+    "afterPack": "afterPack.js",
     "files": [
       "main.js",
       "error.html",
