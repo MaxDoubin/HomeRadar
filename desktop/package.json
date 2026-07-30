@@ -35,6 +35,7 @@
     "files": [
       "main.js",
       "error.html",
+      "loading.html",
       "package.json"
     ],
     "mac": {

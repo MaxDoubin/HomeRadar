@@ -54,7 +54,7 @@ async function showStartupError(error) {
   dialog.showErrorBox("Home Radar could not start", `${query.message}\n\nLog: ${query.logPath}`);
 }
 
-async function waitForBackend(port, timeoutMilliseconds = 45000) {
+async function waitForBackend(port, timeoutMilliseconds = 120000) {
   const deadline = Date.now() + timeoutMilliseconds;
   while (Date.now() < deadline) {
     const available = await new Promise((resolve) => {
@@ -216,6 +216,14 @@ async function createWindow() {
     mainWindow = null;
     if (!quitting) stopBackend();
   });
+
+  // Show a loading screen immediately rather than leaving the window hidden for
+  // the whole backend cold-start. A frozen PyInstaller backend can genuinely take
+  // tens of seconds to unpack and boot -- especially on the older/slower repurposed
+  // hardware this project targets -- and a fully invisible window for that whole
+  // stretch reads as "the app didn't open" rather than "it's starting."
+  await mainWindow.loadFile(path.join(__dirname, "loading.html"));
+  mainWindow.show();
 
   try {
     await startBackend();
