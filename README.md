@@ -42,6 +42,10 @@ Every running appliance also serves itself as an installable **Progressive Web A
 
 Service worker registration (and therefore installability/offline support) requires a secure browsing context — HTTPS, or `http://localhost`. It silently does nothing on a plain `http://<lan-ip>:8000` address, which is how most households reach their appliance; the dashboard itself works identically either way, with or without the installable layer.
 
+### Just want to see it running, with nothing to set up?
+
+[`render.yaml`](render.yaml) deploys the real Home Radar appliance to Render's free tier for exactly this: a public link for a demo or presentation, no local network required. It turns on `HOMERADAR_DEMO_MODE`, which adds a **Simulate an attack** panel to Settings — one click fires a real, dashboard-visible alert (a Wi-Fi deauth attempt or a malicious connection) through the same code a genuine detection would use, without needing real attack traffic. It's off by default everywhere else; a real appliance should never be able to fabricate its own alerts.
+
 ### First launch notes
 
 Home Radar builds are currently open-source community builds and are not yet signed with commercial Apple or Microsoft certificates.
@@ -132,10 +136,10 @@ Network history and device inventory stay in the appliance's local SQLite databa
 - Per-device internet pause, quiet-hour schedules, custom allowlists, and blocklists
 - Weekly email digest, browser notifications, mobile notifications, and real-time WebSockets
 - Optional AbuseIPDB reputation checks and local CISA Known Exploited Vulnerabilities catalog
-- Passive traffic observation and experimental anomaly detection
+- Passive traffic observation and experimental anomaly detection, with per-device bandwidth sparklines on the Devices page
 - Daily integrity-checked SQLite backups, retention cleanup, and health diagnostics
 - Docker, native Debian, kiosk, desktop, and live-ISO build paths
-- Demo mode for presenting the interface without scanning a real network
+- Demo mode for presenting the interface without scanning a real network, plus an opt-in live attack simulator (`HOMERADAR_DEMO_MODE=true`) that fires a real, dashboard-visible alert on demand for presentations
 
 ---
 

@@ -72,14 +72,38 @@ function ActivityChart({ timeline = [] }) {
   </div>;
 }
 
-function DeviceRow({ device, onSelect }) {
+function BandwidthSparkline({ buckets }) {
+  if (!buckets) return <small className="subtle">…</small>;
+  let totals = buckets.map((b) => (b.bytes_sent || 0) + (b.bytes_received || 0));
+  if (!totals.some((value) => value > 0)) return <small className="subtle">No traffic</small>;
+  // A single hourly bucket can't draw a line on its own -- lead in from zero
+  // so the one real data point still renders as a visible rise, not nothing.
+  if (totals.length === 1) totals = [0, ...totals];
+  const max = Math.max(1, ...totals);
+  const points = totals.map((value, index) => `${index * (100 / Math.max(1, totals.length - 1))},${20 - (value / max) * 18}`).join(" ");
+  return <svg className="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none">
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+  </svg>;
+}
+
+function DeviceRow({ device, onSelect, showBandwidth }) {
   const state = device.is_authorized === 1 ? "trusted" : device.is_authorized === 2 ? "blocked" : "pending";
-  return <button className="device-row" onClick={() => onSelect(device)}>
+  const [bandwidth, setBandwidth] = useState(null);
+  useEffect(() => {
+    if (!showBandwidth) return;
+    let cancelled = false;
+    api(`/devices/${device.id}/traffic/timeseries?hours=24`)
+      .then((result) => { if (!cancelled) setBandwidth(result.buckets); })
+      .catch(() => { if (!cancelled) setBandwidth([]); });
+    return () => { cancelled = true; };
+  }, [device.id, showBandwidth]);
+  return <button className={`device-row${showBandwidth ? " device-row--wide" : ""}`} onClick={() => onSelect(device)}>
     <span className={`device-glyph ${tone(device.trust_score)}`}>{deviceGlyphs[device.device_type] || "?"}</span>
     <span className="device-main"><strong>{device.hostname || device.model || device.vendor || "Unknown device"}</strong><small>{device.vendor || "Unknown manufacturer"} · {device.ip}</small></span>
     <span className={`pill ${state}`}>{state}</span>
     <span className={`trust ${tone(device.trust_score)}`}>{device.trust_score}</span>
     <span className="last-seen">{timeAgo(device.last_seen)}</span>
+    {showBandwidth && <span className={`bandwidth-cell ${tone(device.trust_score)}`}><BandwidthSparkline buckets={bandwidth} /></span>}
   </button>;
 }
 
@@ -88,6 +112,7 @@ function NetworkMap({ devices, onSelect }) {
   return <article className="card network-card">
     <header><div><span>LIVE TOPOLOGY</span><h3>Household network map</h3></div><small>{devices.length} devices</small></header>
     <div className="network-map">
+      <div className="radar-sweep" aria-hidden="true" />
       <div className="hub"><span>⌁</span><b>ROUTER</b></div>
       {visible.map((device, index) => {
         const angle = (Math.PI * 2 * index) / Math.max(visible.length, 1) - Math.PI / 2;
@@ -100,7 +125,7 @@ function NetworkMap({ devices, onSelect }) {
   </article>;
 }
 
-function Overview({ data, onNavigate, onSelect }) {
+function Overview({ data, onNavigate, onSelect, freshAlertIds = new Set() }) {
   const { status = {}, devices = [], alerts = [], traffic = {} } = data;
   const pending = devices.filter((device) => device.is_authorized === 0).length;
   return <>
@@ -132,7 +157,7 @@ function Overview({ data, onNavigate, onSelect }) {
       <article className="card panel alert-panel">
         <header><div><span>RECENT ALERTS</span><h3>What needs your attention</h3></div><button onClick={() => onNavigate("Alerts")}>View all</button></header>
         <div className="alert-list">
-          {alerts.slice(0, 4).map((alert) => <div className="alert-item" key={alert.id}><b className={alert.severity}>!</b><div><strong>{alert.title}</strong><p>{alert.description}</p></div><small>{timeAgo(alert.created_at)}</small></div>)}
+          {alerts.slice(0, 4).map((alert) => <div className={`alert-item${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><strong>{alert.title}</strong><p>{alert.description}</p></div><small>{timeAgo(alert.created_at)}</small></div>)}
           {!alerts.length && <div className="empty">No active alerts. Your network is quiet.</div>}
         </div>
       </article>
@@ -154,8 +179,8 @@ function Devices({ devices, onSelect, onScan, busy }) {
     <NetworkMap devices={devices} onSelect={onSelect}/>
     <div className="toolbar card"><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, IP, MAC, vendor, or type…" /><span>{filtered.length} devices</span></div>
     <article className="card panel devices-panel full">
-      <div className="table-head"><span>DEVICE</span><span>STATUS</span><span>TRUST</span><span>LAST SEEN</span></div>
-      {filtered.map((device) => <DeviceRow key={device.id} device={device} onSelect={onSelect} />)}
+      <div className="table-head table-head--wide"><span>DEVICE</span><span>STATUS</span><span>TRUST</span><span>LAST SEEN</span><span>BANDWIDTH · 24H</span></div>
+      {filtered.map((device) => <DeviceRow key={device.id} device={device} onSelect={onSelect} showBandwidth />)}
     </article>
   </section>;
 }
@@ -203,9 +228,9 @@ function Traffic({ traffic }) {
   </section>;
 }
 
-function Alerts({ alerts, onResolve }) {
+function Alerts({ alerts, onResolve, freshAlertIds = new Set() }) {
   return <section><div className="page-heading"><div><p className="eyebrow">ATTENTION</p><h1>Alerts</h1><p className="subtle">Prioritized security events with clear next actions.</p></div></div>
-    <article className="card panel alert-page">{alerts.map((alert) => <div className="alert-card" key={alert.id}><b className={alert.severity}>!</b><div><span>{alert.severity}</span><h3>{alert.title}</h3><p>{alert.description}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div><button onClick={() => onResolve(alert.id)}>Resolve</button></div>)}{!alerts.length && <div className="empty big">No open alerts. Everything looks calm.</div>}</article>
+    <article className="card panel alert-page">{alerts.map((alert) => <div className={`alert-card${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><span>{alert.severity}</span><h3>{alert.title}</h3><p>{alert.description}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div><button onClick={() => onResolve(alert.id)}>Resolve</button></div>)}{!alerts.length && <div className="empty big">No open alerts. Everything looks calm.</div>}</article>
   </section>;
 }
 
@@ -230,7 +255,7 @@ function SetupWizard({ onComplete }) {
   </section></div>;
 }
 
-function Settings() {
+function Settings({ onRefreshDashboard }) {
   const [form, setForm] = useState({});
   const [message, setMessage] = useState("");
   const [health, setHealth] = useState(null);
@@ -251,6 +276,8 @@ function Settings() {
   const [cisaBusy, setCisaBusy] = useState(false);
   const [cisaUpdateBusy, setCisaUpdateBusy] = useState(false);
   const [cisaMsg, setCisaMsg] = useState("");
+  const [demoBusy, setDemoBusy] = useState("");
+  const [demoMsg, setDemoMsg] = useState("");
   const refreshSystem = () => {
     api("/health").then(setHealth);
     api("/backups").then((result)=>setBackups(result.backups));
@@ -355,6 +382,23 @@ function Settings() {
       setRegenBusy(false);
     }
   };
+  const simulateAttack = async (kind) => {
+    setDemoBusy(kind);
+    setDemoMsg("");
+    try {
+      await api("/demo/simulate-attack", { method: "POST", body: JSON.stringify({ kind }) });
+      setDemoMsg("Alert triggered — check Overview or Alerts.");
+      await onRefreshDashboard?.();
+    } catch (err) {
+      setDemoMsg(
+        err.status === 404
+          ? "Demo mode isn't enabled on this appliance. Set HOMERADAR_DEMO_MODE=true to turn it on."
+          : `Error: ${err.message}`,
+      );
+    } finally {
+      setDemoBusy("");
+    }
+  };
   return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household, DNS, and digest preferences.</p></div></div>
     <div className="settings-grid"><form className="card settings-form" onSubmit={save}>
       <label><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({...form, household_name:e.target.value})}/></label>
@@ -435,17 +479,28 @@ function Settings() {
       </div>
       <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
       {regenMessage && <p className={regenMessage === "Token regenerated" ? "good" : "health-warning"}>{regenMessage === "Token regenerated" ? regenMessage : `! ${regenMessage}`}</p>}
+    </aside>
+    <aside className="card system-card pairing-card">
+      <p className="eyebrow">LIVE DEMO</p>
+      <h2>Simulate an attack</h2>
+      <p className="subtle">Trigger a real, dashboard-visible alert to show how Home Radar reacts — no real attack traffic needed.</p>
+      <div className="demo-actions">
+        <button onClick={() => simulateAttack("deauth")} disabled={!!demoBusy}>{demoBusy === "deauth" ? "Triggering…" : "Simulate Wi-Fi deauth attack"}</button>
+        <button onClick={() => simulateAttack("malicious_dns")} disabled={!!demoBusy}>{demoBusy === "malicious_dns" ? "Triggering…" : "Simulate malicious connection"}</button>
+      </div>
+      {demoMsg && <p className={demoMsg.startsWith("Error") || demoMsg.startsWith("Demo mode") ? "health-warning" : "good"}>{demoMsg}</p>}
     </aside></div>
   </section>;
 }
 
 export default function App() {
   const [page, setPage] = useState("Overview");
-  const [data, setData] = useState({ status: {}, devices: [], alerts: [], traffic: {} });
+  const [data, setData] = useState({ status: {}, devices: [], alerts: undefined, traffic: {} });
   const [selected, setSelected] = useState(null);
   const [busy, setBusy] = useState(false);
   const [connected, setConnected] = useState(false);
   const [setupComplete, setSetupComplete] = useState(true);
+  const [freshAlertIds, setFreshAlertIds] = useState(() => new Set());
   const seenAlerts = useRef(new Set());
   const alertsInitialized = useRef(false);
   const load = () => api("/dashboard").then(setData).catch(() => setConnected(false));
@@ -463,13 +518,31 @@ export default function App() {
     return () => { clearTimeout(retry); socket?.close(); };
   }, []);
   useEffect(() => {
-    for (const alert of data.alerts || []) {
-      if (alertsInitialized.current && !seenAlerts.current.has(alert.id) && "Notification" in window && Notification.permission === "granted") {
-        new Notification(`Home Radar: ${alert.title}`, { body: alert.description || "Open the dashboard for details." });
+    if (!data.alerts) return; // still the pre-fetch placeholder, not real data yet
+    const fresh = [];
+    for (const alert of data.alerts) {
+      if (alertsInitialized.current && !seenAlerts.current.has(alert.id)) {
+        fresh.push(alert.id);
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification(`Home Radar: ${alert.title}`, { body: alert.description || "Open the dashboard for details." });
+        }
       }
       seenAlerts.current.add(alert.id);
     }
     alertsInitialized.current = true;
+    if (!fresh.length) return;
+    // Kept fresh for a fixed window (not "until the next snapshot arrives"):
+    // the live websocket re-sends a full snapshot every ~3s even when nothing
+    // changed, which would otherwise clear the highlight almost immediately.
+    setFreshAlertIds((current) => new Set([...current, ...fresh]));
+    const timer = setTimeout(() => {
+      setFreshAlertIds((current) => {
+        const next = new Set(current);
+        fresh.forEach((id) => next.delete(id));
+        return next;
+      });
+    }, 8000);
+    return () => clearTimeout(timer);
   }, [data.alerts]);
   const scan = async () => { setBusy(true); try { await api("/scan", {method:"POST"}); await load(); } finally { setBusy(false); } };
   const resolve = async (id) => { await api(`/alerts/${id}`, {method:"PATCH", body:JSON.stringify({resolved:true})}); await load(); };
@@ -482,11 +555,11 @@ export default function App() {
     </aside>
     <main><header className="topbar"><span>{title}</span><div><button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{data.status?.security_score ?? 100}</span></div></header>
       <div className="content">
-        {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected}/>}
+        {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected} freshAlertIds={freshAlertIds}/>}
         {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy}/>}
         {page === "Traffic" && <Traffic traffic={data.traffic || {}}/>}
-        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve}/>}
-        {page === "Settings" && <Settings/>}
+        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} freshAlertIds={freshAlertIds}/>}
+        {page === "Settings" && <Settings onRefreshDashboard={load}/>}
       </div>
     </main>
     <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }}/>

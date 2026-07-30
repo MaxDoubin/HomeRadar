@@ -6,9 +6,11 @@ export const mockDevices = [
 ];
 
 export const mockAlerts = [
-  { id: "a1", severity: "danger", title: "Suspicious Traffic Blocked", description: "Camera attempted to contact a known malware domain.", created_at: new Date(Date.now() - 7200000).toISOString() },
-  { id: "a2", severity: "warn", title: "New Device Discovered", description: "An unknown IoT Camera joined the network.", created_at: new Date(Date.now() - 86400000).toISOString() },
+  { id: "a1", severity: "critical", title: "Suspicious Traffic Blocked", description: "Camera attempted to contact a known malware domain.", created_at: new Date(Date.now() - 7200000).toISOString() },
+  { id: "a2", severity: "warning", title: "New Device Discovered", description: "An unknown IoT Camera joined the network.", created_at: new Date(Date.now() - 86400000).toISOString() },
 ];
+
+let demoAlertCounter = 0;
 
 export const mockTraffic = {
   queries: 12453,
@@ -73,6 +75,15 @@ export async function handleDemoApi(path, options = {}) {
         { id: "t3", domain: "tracker.bad", was_blocked: true },
       ];
     }
+    if (path.includes("/traffic/timeseries")) {
+      const base = 20000 + (device.id.charCodeAt(0) % 5) * 15000;
+      const buckets = Array.from({ length: 24 }, (_, i) => ({
+        bucket: new Date(Date.now() - (23 - i) * 3600000).toISOString(),
+        bytes_sent: Math.round(base * (0.4 + Math.random() * 0.8)),
+        bytes_received: Math.round(base * 2 * (0.4 + Math.random() * 0.8)),
+      }));
+      return { hours: 24, buckets };
+    }
     if (path.endsWith("/policy")) {
       if (method === "GET") return { internet_enabled: true, block_start: null, block_end: null, blocked_domains: [] };
       if (method === "PUT") return JSON.parse(options.body);
@@ -100,6 +111,30 @@ export async function handleDemoApi(path, options = {}) {
 
   if (path === "/scan" && method === "POST") {
     return {};
+  }
+
+  if (path === "/demo/simulate-attack" && method === "POST") {
+    const { kind } = JSON.parse(options.body || "{}");
+    demoAlertCounter += 1;
+    const device = mockDevices[demoAlertCounter % mockDevices.length];
+    const alert = kind === "malicious_dns"
+      ? {
+          id: `demo-${demoAlertCounter}`,
+          severity: "critical",
+          title: `Suspicious connection: 203.0.113.${10 + (demoAlertCounter % 240)}`,
+          description: `${device.ip} contacted 203.0.113.${10 + (demoAlertCounter % 240)}; demo confidence 98%. (Simulated for demonstration.)`,
+          created_at: new Date().toISOString(),
+        }
+      : {
+          id: `demo-${demoAlertCounter}`,
+          severity: "critical",
+          title: "Wi-Fi Deauthentication Attack Detected",
+          description: `Detected 14 deauth frames from MAC ${device.mac}. This may be a Flipper Zero or similar tool attempting to disconnect devices. (Simulated for demonstration.)`,
+          created_at: new Date().toISOString(),
+        };
+    mockAlerts.unshift(alert);
+    mockStatus.open_alert_count = mockAlerts.length;
+    return { alert_id: alert.id, kind: kind || "deauth" };
   }
 
   if (path === "/settings") {

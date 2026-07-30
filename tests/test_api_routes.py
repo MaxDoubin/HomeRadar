@@ -125,6 +125,26 @@ def test_device_traffic_get_and_404(client, device_id):
     assert response.status_code == 404
 
 
+def test_device_traffic_timeseries(client, device_id, db_path):
+    response = client.get(f"/devices/{device_id}/traffic/timeseries")
+    assert response.status_code == 200
+    assert response.json() == {"hours": 24, "buckets": []}
+
+    with models.get_conn(db_path) as conn:
+        models.log_traffic(conn, device_id=device_id, bytes_sent=100, bytes_received=200)
+        models.log_traffic(conn, device_id=device_id, bytes_sent=50, bytes_received=25)
+
+    response = client.get(f"/devices/{device_id}/traffic/timeseries")
+    assert response.status_code == 200
+    buckets = response.json()["buckets"]
+    assert len(buckets) == 1
+    assert buckets[0]["bytes_sent"] == 150
+    assert buckets[0]["bytes_received"] == 225
+
+    response = client.get("/devices/999999/traffic/timeseries")
+    assert response.status_code == 404
+
+
 def test_device_trust_get_and_404(client, device_id):
     response = client.get(f"/devices/{device_id}/trust")
     assert response.status_code == 200
@@ -576,6 +596,76 @@ def test_pair_regenerate_requires_token_and_invalidates_old(client, auth_headers
     # New token does work.
     response = client.post("/trust/recalculate", headers={"X-HomeRadar-Token": new_token})
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# demo attack simulation
+# ---------------------------------------------------------------------------
+
+
+def test_demo_simulate_attack_404_when_disabled(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", False)
+    response = client.post("/demo/simulate-attack", json={"kind": "deauth"}, headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_demo_simulate_attack_requires_token_when_enabled(client, monkeypatch):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post("/demo/simulate-attack", json={"kind": "deauth"})
+    assert response.status_code == 401
+
+
+def test_demo_simulate_attack_deauth_creates_alert(client, auth_headers, device_id, monkeypatch, db_path):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post("/demo/simulate-attack", json={"kind": "deauth"}, headers=auth_headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "deauth"
+    assert body["alert_id"]
+
+    with models.get_conn(db_path) as conn:
+        alerts = models.list_alerts(conn)
+    assert len(alerts) == 1
+    assert alerts[0]["title"] == "Wi-Fi Deauthentication Attack Detected"
+    assert alerts[0]["severity"] == "critical"
+    assert "Simulated" in alerts[0]["description"]
+    assert alerts[0]["device_id"] == device_id
+
+
+def test_demo_simulate_attack_malicious_dns_creates_alert_and_traffic_log(
+    client, auth_headers, device_id, monkeypatch, db_path
+):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post(
+        "/demo/simulate-attack", json={"kind": "malicious_dns"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["kind"] == "malicious_dns"
+
+    with models.get_conn(db_path) as conn:
+        alerts = models.list_alerts(conn)
+        traffic = models.list_traffic(conn, device_id=device_id)
+    assert len(alerts) == 1
+    assert alerts[0]["title"].startswith("Suspicious connection: 203.0.113.")
+    assert "Simulated" in alerts[0]["description"]
+    assert len(traffic) == 1
+    assert traffic[0]["was_blocked"] == 1
+    assert traffic[0]["threat_level"] == "critical"
+
+
+def test_demo_simulate_attack_invalid_kind_rejected(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post(
+        "/demo/simulate-attack", json={"kind": "not-a-real-kind"}, headers=auth_headers
+    )
+    assert response.status_code == 422
+
+
+def test_demo_simulate_attack_works_with_no_devices(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post("/demo/simulate-attack", json={"kind": "deauth"}, headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["alert_id"]
 
 
 # ---------------------------------------------------------------------------

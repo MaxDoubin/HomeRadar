@@ -83,6 +83,15 @@ describe("api", () => {
     await expect(api("/foo")).rejects.toThrow("bad request");
   });
 
+  it("attaches the real HTTP status to thrown errors", async () => {
+    fetch.mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({ detail: "Not found" }),
+    });
+    await expect(api("/demo/simulate-attack")).rejects.toMatchObject({ status: 404 });
+  });
+
   it("returns null for a successful empty response", async () => {
     fetch.mockResolvedValue({ ok: true, status: 204, json: vi.fn() });
     await expect(api("/empty")).resolves.toBeNull();
