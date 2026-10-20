@@ -204,7 +204,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v3.2.1
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ""
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
