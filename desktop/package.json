@@ -20,8 +20,15 @@
     "url": "https://github.com/MaxDoubin/HomeRadar.git"
   },
   "devDependencies": {
-    "electron": "^43.2.0",
-    "electron-builder": "^26.15.3",
+    "@xmldom/xmldom": "^0.9.12",
+    "axios": "^1.20.0",
+    "electron": "^44.9.1",
+    "electron-builder": "^26.5.0",
+    "fast-uri": "^4.2.3",
+    "http-cache-semantics": "^4.3.0",
+    "joi": "^18.3.0",
+    "js-yaml": "^5.5.0",
+    "undici": "^8.12.3",
     "wait-on": "^9.1.0"
   },
   "build": {
