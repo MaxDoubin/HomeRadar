@@ -110,7 +110,7 @@ def recalculate_all(conn) -> list[dict]:
         """SELECT device_id, severity, COUNT(*) AS count FROM exposure_findings
            WHERE is_resolved = 0 GROUP BY device_id, severity"""
     ).fetchall()
-    findings = {}
+    findings: dict[int, list[dict]] = {}
     for row in findings_rows:
         findings.setdefault(row["device_id"], []).append(dict(row))
 
