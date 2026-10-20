@@ -44,7 +44,6 @@ def test_parse_cisa_kev_catalog_filters_and_maps_records():
 
 
 def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_db, db_path):
-    monkeypatch.setattr("backend.monitor.cisa_kev.socket.gethostbyname", lambda host: "8.8.8.8")
     payload = {
         "vulnerabilities": [
             {
@@ -65,7 +64,7 @@ def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_d
     )
 
     with models.get_conn(db_path) as conn:
-        count = update_catalog(conn, url="https://kev.example/feed.json")
+        count = update_catalog(conn, url="https://www.cisa.gov/feed.json")
     assert count == 1
 
     with models.get_conn(db_path) as conn:
@@ -76,7 +75,6 @@ def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_d
 
 
 def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch, patched_db, db_path):
-    monkeypatch.setattr("backend.monitor.cisa_kev.socket.gethostbyname", lambda host: "8.8.8.8")
     first_payload = {
         "vulnerabilities": [
             {
@@ -96,7 +94,7 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
         lambda request, timeout=None: _FakeJSONResponse(first_payload),
     )
     with models.get_conn(db_path) as conn:
-        update_catalog(conn, url="https://kev.example/feed.json")
+        update_catalog(conn, url="https://www.cisa.gov/feed.json")
 
     second_payload = {
         "vulnerabilities": [
@@ -117,7 +115,7 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
         lambda request, timeout=None: _FakeJSONResponse(second_payload),
     )
     with models.get_conn(db_path) as conn:
-        count = update_catalog(conn, url="https://kev.example/feed.json")
+        count = update_catalog(conn, url="https://www.cisa.gov/feed.json")
     assert count == 1
 
     with models.get_conn(db_path) as conn:

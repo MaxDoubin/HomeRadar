@@ -6,14 +6,14 @@ be correlated against it as fingerprinting becomes more version-specific.
 """
 from __future__ import annotations
 
-import ipaddress
 import json
-import socket
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
 from backend import config
+
+ALLOWED_CISA_DOMAINS = {"www.cisa.gov", "cisa.gov"}
 
 
 def parse_catalog(payload: dict) -> list[dict]:
@@ -44,19 +44,11 @@ def _validated_catalog_url(value: str) -> str:
     if parsed.username or parsed.password:
         raise ValueError("CISA catalog source URL must not contain credentials")
 
-    try:
-        ip = socket.gethostbyname(parsed.hostname)
-        ip_obj = ipaddress.ip_address(ip)
-        if (
-            ip_obj.is_private
-            or ip_obj.is_loopback
-            or ip_obj.is_link_local
-            or ip_obj.is_multicast
-            or ip_obj.is_reserved
-        ):
-            raise ValueError("CISA catalog source URL must resolve to a public IP address")
-    except socket.gaierror as exc:
-        raise ValueError("CISA catalog source URL hostname could not be resolved") from exc
+    if parsed.hostname not in ALLOWED_CISA_DOMAINS:
+        raise ValueError(
+            f"CISA catalog source URL must be hosted on an allowed domain "
+            f"({', '.join(sorted(ALLOWED_CISA_DOMAINS))})"
+        )
 
     return urllib.parse.urlunsplit(parsed)
 
