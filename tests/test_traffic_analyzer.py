@@ -1,8 +1,6 @@
 import logging
 import sys
 
-import pytest
-
 from backend.db import models
 from backend.monitor.threat_intel import Reputation
 from backend.monitor.traffic_analyzer import PassiveTrafficMonitor, record_connection
