@@ -191,3 +191,35 @@ def test_maintenance_loop_logs_and_does_not_crash_on_error(monkeypatch, patched_
             asyncio.run(main._maintenance_loop())
 
     assert "Maintenance pass failed" in caplog.text
+
+
+def test_prepare_first_run_pairing_skipped_if_setup_complete(monkeypatch, patched_db, caplog):
+    monkeypatch.setattr(main.models, "get_setting", lambda conn, key, default: "true")
+
+    # We should not call issue_pairing_code if setup is complete
+    issued = False
+    def mock_issue(*args, **kwargs):
+        nonlocal issued
+        issued = True
+
+    monkeypatch.setattr(main.pairing, "issue_pairing_code", mock_issue)
+
+    main._prepare_first_run_pairing()
+
+    assert not issued
+    assert "HOME RADAR FIRST-RUN PAIRING CODE" not in caplog.text
+
+
+def test_prepare_first_run_pairing_issues_code_if_setup_incomplete(monkeypatch, patched_db, caplog):
+    monkeypatch.setattr(main.models, "get_setting", lambda conn, key, default: "false")
+
+    def mock_issue(conn, ttl_seconds):
+        return {"code": "123456"}
+
+    monkeypatch.setattr(main.pairing, "issue_pairing_code", mock_issue)
+
+    with caplog.at_level(logging.WARNING, logger="homeradar.main"):
+        main._prepare_first_run_pairing()
+
+    assert "HOME RADAR FIRST-RUN PAIRING CODE: 123456" in caplog.text
+    assert "Enter this code in the dashboard within 30 minutes." in caplog.text
