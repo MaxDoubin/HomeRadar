@@ -408,7 +408,7 @@ def get_settings(conn) -> dict[str, str]:
 
 
 def register_apns_token(conn, token: str) -> None:
-    raw_tokens = get_setting(conn, "apns_device_tokens", "[]")
+    raw_tokens = get_setting(conn, "apns_device_tokens", "[]") or "[]"
     try:
         tokens = json.loads(raw_tokens)
     except json.JSONDecodeError:
