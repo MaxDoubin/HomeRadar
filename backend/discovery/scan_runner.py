@@ -134,40 +134,23 @@ def _fingerprint_hosts(hosts: list[dict]) -> list[dict]:
 def run_discovery_scan(conn) -> list[dict]:
     """Perform one full discovery pass and return fingerprinted devices."""
     results = _fingerprint_hosts(_discover_hosts())
-    for info in results:
-        previous = conn.execute(
-            "SELECT id, ip, device_type FROM devices WHERE mac = ?",
-            (info["mac"],),
-        ).fetchone()
-        is_new = previous is None
+    if not results:
+        return []
 
-        device_id = models.upsert_device(
-            conn,
-            mac=info["mac"],
-            ip=info["ip"],
-            hostname=info["hostname"],
-            vendor=info["vendor"],
-            model=info["model"],
-            device_type=info["device_type"],
-            confidence=info["confidence"],
-            open_ports=info["open_ports"],
-            services=info["services"],
-            discovery_sources=info["discovery_sources"],
-            fingerprint=info["fingerprint"],
-        )
-        info["id"] = device_id
+    upserted = models.batch_upsert_devices(conn, results)
 
+    for info, is_new in upserted:
         if is_new:
-            label = info["hostname"] or info["model"] or info["vendor"] or "Unknown device"
+            label = info.get("hostname") or info.get("model") or info.get("vendor") or "Unknown device"
             models.create_alert(
                 conn,
-                device_id=device_id,
+                device_id=info["id"],
                 severity="warning",
                 title="New device connected",
                 description=(
                     f"{label} joined the network at {info['ip']} "
-                    f"({info['mac']}); classified as {info['device_type']} "
-                    f"with {round(info['confidence'] * 100)}% confidence."
+                    f"({info['mac']}); classified as {info.get('device_type', 'unknown')} "
+                    f"with {round(info.get('confidence', 0.0) * 100)}% confidence."
                 ),
             )
 
