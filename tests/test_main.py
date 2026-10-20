@@ -191,3 +191,18 @@ def test_maintenance_loop_logs_and_does_not_crash_on_error(monkeypatch, patched_
             asyncio.run(main._maintenance_loop())
 
     assert "Maintenance pass failed" in caplog.text
+
+def test_run_discovery(monkeypatch):
+    from unittest.mock import MagicMock
+    mock_get_conn = MagicMock()
+    mock_conn = MagicMock()
+    mock_get_conn.return_value.__enter__.return_value = mock_conn
+    mock_run_discovery_scan = MagicMock()
+
+    monkeypatch.setattr(main, "get_conn", mock_get_conn)
+    monkeypatch.setattr(main, "run_discovery_scan", mock_run_discovery_scan)
+
+    main._run_discovery()
+
+    mock_get_conn.assert_called_once()
+    mock_run_discovery_scan.assert_called_once_with(mock_conn)
