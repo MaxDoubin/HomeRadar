@@ -45,9 +45,11 @@ def _run_discovery() -> None:
 async def _trust_loop():
     while True:
         try:
-            with get_conn() as conn:
-                audit_all(conn)
-                recalculate_all(conn)
+            def _update_trust_scores():
+                with get_conn() as conn:
+                    audit_all(conn)
+                    recalculate_all(conn)
+            await asyncio.to_thread(_update_trust_scores)
         except Exception:
             logger.exception("Trust score recalculation failed")
         await asyncio.sleep(config.TRUST_SCORE_INTERVAL_SECONDS)
