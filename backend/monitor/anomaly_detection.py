@@ -103,16 +103,19 @@ def analyze_device_ml(conn, device_id: int) -> None:
         )
 
 
-def analyze_device(conn, device_id: int) -> list[Anomaly]:
-    current = conn.execute(
-        """SELECT COUNT(*) AS queries,
-                  COUNT(DISTINCT domain) AS unique_domains,
-                  COALESCE(SUM(bytes_sent + bytes_received), 0) AS bytes
-           FROM traffic_logs
-           WHERE device_id = ?
-             AND julianday(created_at) >= julianday('now', '-1 hour')""",
-        (device_id,),
-    ).fetchone()
+def analyze_device(conn, device_id: int, prefetched_data: dict | None = None) -> list[Anomaly]:
+    if prefetched_data and "traffic_1h" in prefetched_data:
+        current = prefetched_data["traffic_1h"]
+    else:
+        current = conn.execute(
+            """SELECT COUNT(*) AS queries,
+                      COUNT(DISTINCT domain) AS unique_domains,
+                      COALESCE(SUM(bytes_sent + bytes_received), 0) AS bytes
+               FROM traffic_logs
+               WHERE device_id = ?
+                 AND julianday(created_at) >= julianday('now', '-1 hour')""",
+            (device_id,),
+        ).fetchone()
 
     analyze_device_ml(conn, device_id)
 
