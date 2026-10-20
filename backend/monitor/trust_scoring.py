@@ -14,7 +14,7 @@ class TrustResult:
     factors: dict[str, int]
 
 
-def score_device(conn, device: dict) -> TrustResult:
+def score_device(conn, device: dict, prefetched_data: dict | None = None) -> TrustResult:
     factors: dict[str, int] = {}
 
     if device.get("vendor") and device["vendor"] not in {"Unknown", "Private / randomized MAC"}:
@@ -31,16 +31,35 @@ def score_device(conn, device: dict) -> TrustResult:
     elif authorization == 2:
         factors["household blocked"] = -50
 
-    traffic = conn.execute(
-        """SELECT COUNT(*) AS queries,
-                  COALESCE(SUM(was_blocked), 0) AS blocked,
-                  COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
-                      AS threats,
-                  COUNT(DISTINCT domain) AS domain_variance
-           FROM traffic_logs
-           WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
-        (device["id"],),
-    ).fetchone()
+    if prefetched_data:
+        traffic = prefetched_data.get("traffic", {"queries": 0, "blocked": 0, "threats": 0, "domain_variance": 0})
+        alert_count = prefetched_data.get("alert_count", 0)
+        findings = prefetched_data.get("findings", [])
+    else:
+        traffic = conn.execute(
+            """SELECT COUNT(*) AS queries,
+                      COALESCE(SUM(was_blocked), 0) AS blocked,
+                      COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
+                          AS threats,
+                      COUNT(DISTINCT domain) AS domain_variance
+               FROM traffic_logs
+               WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
+            (device["id"],),
+        ).fetchone()
+
+        alert_count = conn.execute(
+            """SELECT COUNT(*) FROM alerts
+               WHERE device_id = ? AND is_resolved = 0
+                 AND severity IN ('warning', 'critical')""",
+            (device["id"],),
+        ).fetchone()[0]
+
+        findings = conn.execute(
+            """SELECT severity, COUNT(*) AS count FROM exposure_findings
+               WHERE device_id = ? AND is_resolved = 0 GROUP BY severity""",
+            (device["id"],),
+        ).fetchall()
+
     blocked = int(traffic["blocked"])
     threats = int(traffic["threats"])
     variance = int(traffic["domain_variance"])
@@ -51,20 +70,9 @@ def score_device(conn, device: dict) -> TrustResult:
     if variance > 150:
         factors["unusually broad domain activity"] = -10
 
-    alert_count = conn.execute(
-        """SELECT COUNT(*) FROM alerts
-           WHERE device_id = ? AND is_resolved = 0
-             AND severity IN ('warning', 'critical')""",
-        (device["id"],),
-    ).fetchone()[0]
     if alert_count:
         factors["unresolved alerts"] = -min(20, alert_count * 4)
 
-    findings = conn.execute(
-        """SELECT severity, COUNT(*) AS count FROM exposure_findings
-           WHERE device_id = ? AND is_resolved = 0 GROUP BY severity""",
-        (device["id"],),
-    ).fetchall()
     finding_penalty = sum(
         {"critical": 12, "warning": 5, "info": 1}.get(row["severity"], 1) * row["count"]
         for row in findings
@@ -78,10 +86,55 @@ def score_device(conn, device: dict) -> TrustResult:
 
 
 def recalculate_all(conn) -> list[dict]:
+    devices = models.list_devices(conn)
+
+    traffic_24h_rows = conn.execute(
+        """SELECT device_id, COUNT(*) AS queries,
+                  COALESCE(SUM(was_blocked), 0) AS blocked,
+                  COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0) AS threats,
+                  COUNT(DISTINCT domain) AS domain_variance
+           FROM traffic_logs
+           WHERE julianday(created_at) >= julianday('now', '-24 hours')
+           GROUP BY device_id"""
+    ).fetchall()
+    traffic_24h = {row["device_id"]: dict(row) for row in traffic_24h_rows}
+
+    alerts_rows = conn.execute(
+        """SELECT device_id, COUNT(*) as count FROM alerts
+           WHERE is_resolved = 0 AND severity IN ('warning', 'critical')
+           GROUP BY device_id"""
+    ).fetchall()
+    alerts = {row["device_id"]: row["count"] for row in alerts_rows}
+
+    findings_rows = conn.execute(
+        """SELECT device_id, severity, COUNT(*) AS count FROM exposure_findings
+           WHERE is_resolved = 0 GROUP BY device_id, severity"""
+    ).fetchall()
+    findings: dict[int, list[dict]] = {}
+    for row in findings_rows:
+        findings.setdefault(row["device_id"], []).append(dict(row))
+
+    traffic_1h_rows = conn.execute(
+        """SELECT device_id, COUNT(*) AS queries,
+                  COUNT(DISTINCT domain) AS unique_domains,
+                  COALESCE(SUM(bytes_sent + bytes_received), 0) AS bytes
+           FROM traffic_logs
+           WHERE julianday(created_at) >= julianday('now', '-1 hour')
+           GROUP BY device_id"""
+    ).fetchall()
+    traffic_1h = {row["device_id"]: dict(row) for row in traffic_1h_rows}
+
     updates = []
-    for device in models.list_devices(conn):
-        anomalies = analyze_device(conn, device["id"])
-        result = score_device(conn, device)
+    for device in devices:
+        prefetched_data = {
+            "traffic": traffic_24h.get(device["id"], {"queries": 0, "blocked": 0, "threats": 0, "domain_variance": 0}),
+            "alert_count": alerts.get(device["id"], 0),
+            "findings": findings.get(device["id"], []),
+            "traffic_1h": traffic_1h.get(device["id"], {"queries": 0, "unique_domains": 0, "bytes": 0})
+        }
+
+        anomalies = analyze_device(conn, device["id"], prefetched_data)
+        result = score_device(conn, device, prefetched_data)
         models.set_trust_score(conn, device["id"], result.score, "; ".join(result.reasons))
         updates.append(
             {
