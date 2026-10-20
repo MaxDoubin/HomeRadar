@@ -41,7 +41,7 @@ jobs:
         shell: bash
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4.2.2
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -63,7 +63,7 @@ jobs:
 
       - name: Preserve packaged backend log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: packaged-backend-log-${{ matrix.target }}
           path: packaged-backend-${{ matrix.target }}.log

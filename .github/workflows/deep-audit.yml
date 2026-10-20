@@ -19,7 +19,7 @@ jobs:
     name: Python tests and coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -42,7 +42,7 @@ jobs:
     name: Python static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -75,7 +75,7 @@ jobs:
           bandit -q -r backend -x tests -ll 2>&1 | tee bandit.log
       - name: Preserve Python static-analysis logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: python-static-analysis
           path: |
@@ -99,7 +99,7 @@ jobs:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -132,7 +132,7 @@ jobs:
           npm audit --audit-level=high 2>&1 | tee ../desktop-audit.log
       - name: Preserve dependency-audit logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: dependency-audit
           path: |
@@ -156,7 +156,7 @@ jobs:
     name: JavaScript tests, build, and lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
@@ -188,7 +188,7 @@ jobs:
           npx eslint frontend/src desktop/main.js --max-warnings=0 2>&1 | tee eslint.log
       - name: Preserve ESLint log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: eslint-audit
           path: eslint.log
@@ -199,12 +199,14 @@ jobs:
     name: Android tests, lint, and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v3.3.0
+        with:
+          cmdline-tools-version: 11479570
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
@@ -213,7 +215,7 @@ jobs:
         run: gradle :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
       - name: Preserve Android lint reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: android-lint-reports
           path: mobile/android/app/build/reports/lint-results-*
@@ -224,7 +226,7 @@ jobs:
     name: iOS static analysis and build
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -256,7 +258,7 @@ jobs:
             build-for-testing 2>&1 | tee xcode-build.log
       - name: Preserve Xcode logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: xcode-audit-logs
           path: |
@@ -269,7 +271,7 @@ jobs:
     name: Shell, workflows, Dockerfile, and secrets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
       - name: Install ShellCheck
@@ -305,7 +307,7 @@ jobs:
           docker run --rm -v "$PWD:/repo" -w /repo zricethezav/gitleaks:latest detect --source . --no-banner --redact 2>&1 | tee gitleaks.log
       - name: Preserve repository-hygiene logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.6.0
         with:
           name: repository-hygiene
           path: |
@@ -336,7 +338,7 @@ jobs:
       matrix:
         language: [python, javascript-typescript]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}

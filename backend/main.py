@@ -65,11 +65,15 @@ async def _blocklist_loop():
         await asyncio.sleep(max(1, config.BLOCKLIST_UPDATE_HOURS) * 3600)
 
 
+def _run_maintenance_cleanup() -> None:
+    with get_conn() as conn:
+        cleanup_database(conn)
+
+
 async def _maintenance_loop():
     while True:
         try:
-            with get_conn() as conn:
-                cleanup_database(conn)
+            await asyncio.to_thread(_run_maintenance_cleanup)
             await asyncio.to_thread(backup_if_due)
         except Exception:
             logger.exception("Maintenance pass failed")
