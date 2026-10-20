@@ -96,6 +96,52 @@ describe("api", () => {
     fetch.mockResolvedValue({ ok: true, status: 204, json: vi.fn() });
     await expect(api("/empty")).resolves.toBeNull();
   });
+
+  it("bubbles up network failures thrown by fetch", async () => {
+    const error = new TypeError("Failed to fetch");
+    fetch.mockRejectedValue(error);
+    await expect(api("/network-error")).rejects.toThrow(error);
+  });
+
+  it("uses a fallback message for errors when JSON parsing fails", async () => {
+    fetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => { throw new Error("Invalid JSON"); },
+    });
+    await expect(api("/broken")).rejects.toThrow("Request failed (500)");
+  });
+
+  it("retries a request when it receives a 401 Unauthorized status", async () => {
+    fetch.mockImplementationOnce(async () => {
+      return { ok: false, status: 401, json: async () => ({ detail: "Unauthorized" }) };
+    });
+
+    fetch.mockImplementationOnce(async (url, options = {}) => {
+      if (String(url).includes("/pair/claim")) {
+        return { ok: true, status: 200, json: async () => ({ token: "new-paired-token" }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    });
+
+    fetch.mockImplementationOnce(async () => {
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    });
+
+    const apiPromise = api("/protected-route");
+
+    await new Promise((resolve) => setTimeout(resolve, 0)); // let event loop run
+
+    const gate = document.querySelector(".hr-pairing-gate");
+    expect(gate).not.toBeNull();
+    const input = gate.querySelector("input");
+    input.value = "654321";
+    gate.querySelector("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    const result = await apiPromise;
+    expect(result).toEqual({ success: true });
+    expect(getStoredToken()).toBe("new-paired-token");
+  });
 });
 
 describe("secure bootstrap and pairing", () => {
