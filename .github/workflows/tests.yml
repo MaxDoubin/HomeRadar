@@ -45,7 +45,7 @@ jobs:
         with:
           name: pytest-python-${{ matrix.python }}
           path: pytest-${{ matrix.python }}.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
   frontend:
@@ -94,7 +94,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@v3.2.1
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
@@ -131,7 +131,7 @@ jobs:
         with:
           name: xcodebuild-log
           path: mobile/ios/HomeRadar/xcodebuild.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
   docker:

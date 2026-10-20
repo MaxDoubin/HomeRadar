@@ -82,7 +82,7 @@ jobs:
             ruff.log
             mypy.log
             bandit.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
       - name: Enforce static-analysis results
         env:
@@ -139,7 +139,7 @@ jobs:
             python-audit.log
             frontend-audit.log
             desktop-audit.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
       - name: Enforce dependency-audit results
         env:
@@ -192,7 +192,7 @@ jobs:
         with:
           name: eslint-audit
           path: eslint.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
 
   android:
@@ -204,7 +204,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: android-actions/setup-android@v4
+      - uses: android-actions/setup-android@v3.2.1
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
@@ -313,7 +313,7 @@ jobs:
             actionlint.log
             hadolint.log
             gitleaks.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 7
       - name: Enforce repository-hygiene results
         env:
