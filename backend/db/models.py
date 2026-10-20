@@ -498,3 +498,120 @@ def list_findings(
             finding["evidence"] = []
         rows.append(finding)
     return rows
+
+
+def batch_upsert_devices(conn, devices: list[dict]) -> list[tuple[dict, bool]]:
+    if not devices:
+        return []
+
+    now = _now()
+    macs = [info["mac"].upper() for info in devices]
+    existing = {}
+    for i in range(0, len(macs), 900):
+        chunk = macs[i:i + 900]
+        placeholders = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"SELECT id, mac, ip, device_type FROM devices WHERE mac IN ({placeholders})",
+            chunk
+        ).fetchall()
+        for r in rows:
+            existing[r["mac"]] = dict(r)
+
+    inserts_data = []
+    updates_data = []
+    events_data = []
+
+    new_macs = set()
+    mac_to_info = {}
+
+    for info in devices:
+        mac = info["mac"].upper()
+        mac_to_info[mac] = info
+        ports_json = json.dumps(info.get("open_ports") or [])
+        services_json = json.dumps(info.get("services") or [])
+        sources_json = json.dumps(info.get("discovery_sources") or [])
+        fingerprint_json = json.dumps(info.get("fingerprint") or {})
+
+        row = existing.get(mac)
+        device_type = info.get("device_type", "unknown")
+
+        if row is None:
+            inserts_data.append((
+                mac, info["ip"], info.get("hostname"), info.get("vendor"), info.get("model"),
+                device_type, info.get("confidence", 0.0),
+                ports_json, services_json, sources_json, fingerprint_json, now, now
+            ))
+            new_macs.add(mac)
+        else:
+            device_id = row["id"]
+            if row["ip"] and row["ip"] != info["ip"]:
+                events_data.append((device_id, 'ip_changed', f"{row['ip']} -> {info['ip']}", now))
+
+            if device_type != "unknown" and row["device_type"] != device_type and row["device_type"] != "unknown":
+                events_data.append((device_id, 'type_changed', f"{row['device_type']} -> {device_type}", now))
+
+            updates_data.append((
+                info["ip"], info.get("hostname"), info.get("vendor"), info.get("model"),
+                device_type, device_type, device_type, info.get("confidence", 0.0),
+                ports_json, services_json, sources_json, fingerprint_json, now, device_id
+            ))
+
+    if inserts_data:
+        conn.executemany(
+            """INSERT INTO devices (
+                   mac, ip, hostname, vendor, model, device_type,
+                   fingerprint_confidence, open_ports, services, discovery_sources,
+                   fingerprint, first_seen, last_seen
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            inserts_data
+        )
+
+    if updates_data:
+        conn.executemany(
+            """UPDATE devices SET
+                   ip = ?,
+                   hostname = COALESCE(?, hostname),
+                   vendor = COALESCE(?, vendor),
+                   model = COALESCE(?, model),
+                   device_type = CASE WHEN ? = 'unknown' THEN device_type ELSE ? END,
+                   fingerprint_confidence = CASE
+                       WHEN ? = 'unknown' THEN fingerprint_confidence ELSE ?
+                   END,
+                   open_ports = ?,
+                   services = ?,
+                   discovery_sources = ?,
+                   fingerprint = ?,
+                   last_seen = ?
+               WHERE id = ?""",
+            updates_data
+        )
+
+    if inserts_data:
+        for i in range(0, len(macs), 900):
+            chunk = macs[i:i + 900]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT id, mac FROM devices WHERE mac IN ({placeholders})",
+                chunk
+            ).fetchall()
+            for r in rows:
+                if r["mac"] not in existing:
+                    existing[r["mac"]] = {"id": r["id"]}
+
+    for mac in new_macs:
+        events_data.append((existing[mac]["id"], 'new_device', f"First seen at {mac_to_info[mac]['ip']}", now))
+
+    if events_data:
+        conn.executemany(
+            "INSERT INTO events (device_id, event_type, detail, created_at) VALUES (?, ?, ?, ?)",
+            events_data
+        )
+
+    results_with_status = []
+    for info in devices:
+        mac = info["mac"].upper()
+        info["id"] = existing[mac]["id"]
+        is_new = mac in new_macs
+        results_with_status.append((info, is_new))
+
+    return results_with_status
