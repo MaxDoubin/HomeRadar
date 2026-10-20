@@ -1,6 +1,7 @@
 """Thin SQLite data-access layer. No ORM by design -- Home Radar's DB is meant
 to stay a single portable file a family never has to think about."""
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -31,6 +32,14 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _is_safe_sql_identifier(s: str) -> bool:
+    return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", s))
+
+
+def _is_safe_sql_definition(s: str) -> bool:
+    return bool(re.match(r"^[A-Za-z0-9_ ''.-]+$", s))
+
+
 def init_db(db_path: str = config.DB_PATH) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
@@ -39,12 +48,16 @@ def init_db(db_path: str = config.DB_PATH) -> None:
             row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()
         }
         for column, definition in _DEVICE_COLUMNS.items():
+            if not _is_safe_sql_identifier(column) or not _is_safe_sql_definition(definition):
+                raise ValueError(f"Unsafe SQL column or definition: {column} {definition}")
             if column not in existing:
                 conn.execute(f"ALTER TABLE devices ADD COLUMN {column} {definition}")
         traffic_existing = {
             row[1] for row in conn.execute("PRAGMA table_info(traffic_logs)").fetchall()
         }
         for column, definition in _TRAFFIC_COLUMNS.items():
+            if not _is_safe_sql_identifier(column) or not _is_safe_sql_definition(definition):
+                raise ValueError(f"Unsafe SQL column or definition: {column} {definition}")
             if column not in traffic_existing:
                 conn.execute(f"ALTER TABLE traffic_logs ADD COLUMN {column} {definition}")
 

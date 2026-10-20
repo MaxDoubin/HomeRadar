@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "electron": "^43.2.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.5.0",
     "wait-on": "^9.1.0"
   },
   "build": {
@@ -91,5 +91,8 @@
   },
   "overrides": {
     "brace-expansion": "5.0.8"
+  },
+  "dependencies": {
+    "app-builder-lib": "^26.5.0"
   }
 }
