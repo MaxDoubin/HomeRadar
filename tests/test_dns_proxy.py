@@ -2,7 +2,6 @@ import socket
 import threading
 import time
 
-import pytest
 from dnslib import A, DNSRecord, QTYPE, RCODE, RR
 
 from backend import config
