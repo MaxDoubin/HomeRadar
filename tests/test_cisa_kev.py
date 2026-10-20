@@ -44,6 +44,7 @@ def test_parse_cisa_kev_catalog_filters_and_maps_records():
 
 
 def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_db, db_path):
+    monkeypatch.setattr("backend.monitor.cisa_kev.socket.gethostbyname", lambda host: "8.8.8.8")
     payload = {
         "vulnerabilities": [
             {
@@ -75,6 +76,7 @@ def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_d
 
 
 def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch, patched_db, db_path):
+    monkeypatch.setattr("backend.monitor.cisa_kev.socket.gethostbyname", lambda host: "8.8.8.8")
     first_payload = {
         "vulnerabilities": [
             {
