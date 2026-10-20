@@ -510,8 +510,8 @@ def batch_upsert_devices(conn, devices: list[dict]) -> list[tuple[dict, bool]]:
     for i in range(0, len(macs), 900):
         chunk = macs[i:i + 900]
         placeholders = ",".join("?" * len(chunk))
-        rows = conn.execute(
-            f"SELECT id, mac, ip, device_type FROM devices WHERE mac IN ({placeholders})",
+        rows = conn.execute(  # nosec B608
+            f"SELECT id, mac, ip, device_type FROM devices WHERE mac IN ({placeholders})",  # nosec B608
             chunk
         ).fetchall()
         for r in rows:
@@ -590,8 +590,8 @@ def batch_upsert_devices(conn, devices: list[dict]) -> list[tuple[dict, bool]]:
         for i in range(0, len(macs), 900):
             chunk = macs[i:i + 900]
             placeholders = ",".join("?" * len(chunk))
-            rows = conn.execute(
-                f"SELECT id, mac FROM devices WHERE mac IN ({placeholders})",
+            rows = conn.execute(  # nosec B608
+                f"SELECT id, mac FROM devices WHERE mac IN ({placeholders})",  # nosec B608
                 chunk
             ).fetchall()
             for r in rows:
