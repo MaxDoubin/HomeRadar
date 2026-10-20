@@ -1,4 +1,3 @@
-import asyncio
 from backend.main import app
 from fastapi.testclient import TestClient
 
