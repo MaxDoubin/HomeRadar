@@ -106,6 +106,49 @@ def audit_device(conn, device: dict) -> list[dict]:
 
 
 def audit_all(conn) -> list[dict]:
-    for device in models.list_devices(conn):
-        audit_device(conn, device)
+    now = datetime.now(timezone.utc).isoformat()
+    devices = models.list_devices(conn)
+
+    device_ids = []
+    finding_params = []
+
+    for device in devices:
+        device_ids.append((device["id"],))
+        for finding in assess_device(device):
+            finding_params.append((
+                device["id"],
+                finding.key,
+                finding.severity,
+                finding.title,
+                finding.description,
+                finding.recommendation,
+                json.dumps(finding.evidence),
+                now,
+                now,
+            ))
+
+    if device_ids:
+        conn.executemany(
+            """UPDATE exposure_findings SET is_resolved = 1
+               WHERE device_id = ?""",
+            device_ids,
+        )
+
+    if finding_params:
+        conn.executemany(
+            """INSERT INTO exposure_findings (
+                   device_id, finding_key, severity, title, description,
+                   recommendation, evidence, is_resolved, first_seen, last_seen
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+               ON CONFLICT(device_id, finding_key) DO UPDATE SET
+                   severity = excluded.severity,
+                   title = excluded.title,
+                   description = excluded.description,
+                   recommendation = excluded.recommendation,
+                   evidence = excluded.evidence,
+                   is_resolved = 0,
+                   last_seen = excluded.last_seen""",
+            finding_params,
+        )
+
     return models.list_findings(conn)
