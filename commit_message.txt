@@ -1,0 +1,3 @@
+ci: fix android action failure by setting cmdline-tools version
+
+The android-actions/setup-android@v3 github action failed downloading tools because cmdline-tools defaults to latest, which is apparently missing or corrupted in the repository. We explicitly pin cmdline-tools-version to 11479570 (version 16.0). We also migrate setup-java from v4 to v5 to fix deprecation warnings.
