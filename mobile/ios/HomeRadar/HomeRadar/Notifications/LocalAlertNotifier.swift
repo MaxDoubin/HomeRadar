@@ -1,12 +1,5 @@
-// TODO(v2, needs Apple Developer Program credentials + APNs push
-// certificate): register for remote notifications and wire an APNs
-// device-token upload endpoint here. This pass only supports LOCAL
-// notifications fired while the app process is alive and the dashboard
-// websocket connection is open (foreground, or brief background execution
-// right after backgrounding) -- there is no true background/killed-app push
-// in this pass.
-
 import Foundation
+import UIKit
 import UserNotifications
 
 /// Turns live dashboard snapshots into local alert notifications.
@@ -62,7 +55,13 @@ final class LocalAlertNotifier {
     /// was actually granted, so the caller can revert the toggle if not.
     func requestAuthorization() async -> Bool {
         do {
-            return try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            let granted = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            if granted {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+            return granted
         } catch {
             return false
         }

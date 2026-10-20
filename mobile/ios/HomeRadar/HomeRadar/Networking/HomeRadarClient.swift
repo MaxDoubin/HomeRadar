@@ -177,6 +177,14 @@ final class HomeRadarClient {
         return try await perform(request, decoding: Settings.self)
     }
 
+    // MARK: - Notifications
+
+    func registerAPNSToken(token: String) async throws {
+        let body = try Self.encoder.encode(APNSTokenRequest(token: token))
+        let request = try makeRequest(path: "/notifications/apns-token", method: "POST", body: body)
+        _ = try await perform(request)
+    }
+
     // MARK: - Health
 
     func health() async throws -> Health {
