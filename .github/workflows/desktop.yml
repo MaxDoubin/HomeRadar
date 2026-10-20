@@ -154,7 +154,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
 
 
       - name: Set up Gradle
