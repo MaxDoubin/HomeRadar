@@ -1,6 +1,7 @@
 """Thin SQLite data-access layer. No ORM by design -- Home Radar's DB is meant
 to stay a single portable file a family never has to think about."""
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -39,12 +40,20 @@ def init_db(db_path: str = config.DB_PATH) -> None:
             row[1] for row in conn.execute("PRAGMA table_info(devices)").fetchall()
         }
         for column, definition in _DEVICE_COLUMNS.items():
+            if not re.match(r"^[A-Za-z0-9_]+$", column):
+                raise ValueError(f"Invalid column name: {column}")
+            if not re.match(r"^[A-Za-z0-9_ '.]+$", definition):
+                raise ValueError(f"Invalid column definition: {definition}")
             if column not in existing:
                 conn.execute(f"ALTER TABLE devices ADD COLUMN {column} {definition}")
         traffic_existing = {
             row[1] for row in conn.execute("PRAGMA table_info(traffic_logs)").fetchall()
         }
         for column, definition in _TRAFFIC_COLUMNS.items():
+            if not re.match(r"^[A-Za-z0-9_]+$", column):
+                raise ValueError(f"Invalid column name: {column}")
+            if not re.match(r"^[A-Za-z0-9_ '.]+$", definition):
+                raise ValueError(f"Invalid column definition: {definition}")
             if column not in traffic_existing:
                 conn.execute(f"ALTER TABLE traffic_logs ADD COLUMN {column} {definition}")
 
