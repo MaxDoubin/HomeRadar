@@ -20,9 +20,9 @@
     "url": "https://github.com/MaxDoubin/HomeRadar.git"
   },
   "devDependencies": {
-    "electron": "^43.2.0",
+    "electron": "^44.9.1",
     "electron-builder": "^26.15.3",
-    "wait-on": "^9.1.0"
+    "wait-on": "^9.5.1"
   },
   "build": {
     "appId": "com.maxdoubin.homeradar",
@@ -90,6 +90,7 @@
     ]
   },
   "overrides": {
-    "brace-expansion": "5.0.8"
+    "brace-expansion": "5.0.12",
+    "roarr": "7.24.1", "global-agent": "3.0.0"
   }
 }
