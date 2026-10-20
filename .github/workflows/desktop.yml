@@ -155,7 +155,7 @@ jobs:
           java-version: "21"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v2
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
