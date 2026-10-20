@@ -2,6 +2,7 @@ import tempfile
 import sqlite3
 from pathlib import Path
 
+import pytest
 from backend.db import models
 
 
@@ -120,3 +121,47 @@ def test_init_db_migrates_original_phase_one_database():
             "discovery_sources",
             "fingerprint",
         } <= columns
+
+import pytest
+
+def test_init_db_prevents_sql_injection():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "test_inject.db")
+
+        # Test malicious device column name
+        original_device_columns = models._DEVICE_COLUMNS.copy()
+        models._DEVICE_COLUMNS["bad_col; DROP TABLE devices;"] = "TEXT"
+        try:
+            with pytest.raises(ValueError, match="Invalid column name"):
+                models.init_db(db_path)
+        finally:
+            models._DEVICE_COLUMNS.clear()
+            models._DEVICE_COLUMNS.update(original_device_columns)
+
+        # Test malicious device column definition
+        models._DEVICE_COLUMNS["good_col"] = "TEXT; DROP TABLE devices;"
+        try:
+            with pytest.raises(ValueError, match="Invalid column definition"):
+                models.init_db(db_path)
+        finally:
+            models._DEVICE_COLUMNS.clear()
+            models._DEVICE_COLUMNS.update(original_device_columns)
+
+        # Test malicious traffic column name
+        original_traffic_columns = models._TRAFFIC_COLUMNS.copy()
+        models._TRAFFIC_COLUMNS["bad_col; DROP TABLE traffic_logs;"] = "TEXT"
+        try:
+            with pytest.raises(ValueError, match="Invalid column name"):
+                models.init_db(db_path)
+        finally:
+            models._TRAFFIC_COLUMNS.clear()
+            models._TRAFFIC_COLUMNS.update(original_traffic_columns)
+
+        # Test malicious traffic column definition
+        models._TRAFFIC_COLUMNS["good_col"] = "TEXT; DROP TABLE traffic_logs;"
+        try:
+            with pytest.raises(ValueError, match="Invalid column definition"):
+                models.init_db(db_path)
+        finally:
+            models._TRAFFIC_COLUMNS.clear()
+            models._TRAFFIC_COLUMNS.update(original_traffic_columns)
