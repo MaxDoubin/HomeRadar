@@ -40,6 +40,44 @@ describe("token storage", () => {
     expect(localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(getStoredToken()).toBeNull();
   });
+
+  it("calls localStorage.setItem when a token is set", () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
+    setStoredToken("test-token-123");
+    expect(setItemSpy).toHaveBeenCalledWith(TOKEN_KEY, "test-token-123");
+    setItemSpy.mockRestore();
+  });
+
+  it("calls localStorage.removeItem when a token is cleared", () => {
+    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+    setStoredToken(null);
+    expect(removeItemSpy).toHaveBeenCalledWith(TOKEN_KEY);
+    removeItemSpy.mockRestore();
+  });
+
+  it("handles localStorage exceptions gracefully during setStoredToken", () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("Storage is full or disabled");
+    });
+
+    expect(() => setStoredToken("fail-storage-token")).not.toThrow();
+    expect(getStoredToken()).toBe("fail-storage-token");
+
+    setItemSpy.mockRestore();
+  });
+
+  it("handles localStorage exceptions gracefully when clearing tokens", () => {
+    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new Error("Storage is disabled");
+    });
+
+    setStoredToken("some-token");
+
+    expect(() => setStoredToken(null)).not.toThrow();
+    expect(getStoredToken()).toBeNull();
+
+    removeItemSpy.mockRestore();
+  });
 });
 
 describe("api", () => {
