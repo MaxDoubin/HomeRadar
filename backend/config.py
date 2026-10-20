@@ -33,7 +33,7 @@ API_PORT = int(os.environ.get("HOMERADAR_API_PORT", "8000"))
 CORS_ALLOW_ORIGINS = [
     value.strip()
     for value in os.environ.get("HOMERADAR_CORS_ORIGINS", "").split(",")
-    if value.strip()
+    if value.strip() and value.strip() != "*"
 ]
 
 # DNS proxy and blocklists. Local-only by default. Docker/systemd appliance
