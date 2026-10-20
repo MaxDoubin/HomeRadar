@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 
 from backend import config
 
+ALLOWED_CISA_DOMAINS = {"www.cisa.gov", "cisa.gov"}
+
 
 def parse_catalog(payload: dict) -> list[dict]:
     records = []
@@ -41,6 +43,13 @@ def _validated_catalog_url(value: str) -> str:
         raise ValueError("CISA catalog source must use an absolute HTTPS URL")
     if parsed.username or parsed.password:
         raise ValueError("CISA catalog source URL must not contain credentials")
+
+    if parsed.hostname not in ALLOWED_CISA_DOMAINS:
+        raise ValueError(
+            f"CISA catalog source URL must be hosted on an allowed domain "
+            f"({', '.join(sorted(ALLOWED_CISA_DOMAINS))})"
+        )
+
     return urllib.parse.urlunsplit(parsed)
 
 
