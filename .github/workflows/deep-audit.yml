@@ -19,8 +19,8 @@ jobs:
     name: Python tests and coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
           cache: pip
@@ -42,8 +42,8 @@ jobs:
     name: Python static analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
           cache: pip
@@ -99,11 +99,11 @@ jobs:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-python@v5.4.0
         with:
           python-version: "3.12"
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.2.0
         with:
           node-version: "24"
       - id: python_audit
@@ -156,8 +156,8 @@ jobs:
     name: JavaScript tests, build, and lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.2.0
         with:
           node-version: "24"
           cache: npm
@@ -199,8 +199,8 @@ jobs:
     name: Android tests, lint, and build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-java@v4.7.0.7.0
         with:
           distribution: temurin
           java-version: "21"
@@ -224,7 +224,7 @@ jobs:
     name: iOS static analysis and build
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -269,7 +269,7 @@ jobs:
     name: Shell, workflows, Dockerfile, and secrets
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
       - name: Install ShellCheck
@@ -336,7 +336,7 @@ jobs:
       matrix:
         language: [python, javascript-typescript]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
