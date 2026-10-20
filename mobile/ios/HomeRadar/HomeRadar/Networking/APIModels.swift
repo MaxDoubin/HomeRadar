@@ -265,6 +265,12 @@ struct PairClaimResult: Codable, Equatable {
     let token: String
 }
 
+// MARK: - Notifications
+
+struct APNSTokenRequest: Encodable {
+    let token: String
+}
+
 // MARK: - Devices / Alerts mutation bodies
 
 /// `PATCH /devices/{id}/authorization` request body.
