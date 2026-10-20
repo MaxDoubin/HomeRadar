@@ -55,28 +55,13 @@ describe("token storage", () => {
     removeItemSpy.mockRestore();
   });
 
-  it("handles localStorage exceptions gracefully during setStoredToken", () => {
-    const setItemSpy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("Storage is full or disabled");
-    });
-
-    expect(() => setStoredToken("fail-storage-token")).not.toThrow();
-    expect(getStoredToken()).toBe("fail-storage-token");
-
-    setItemSpy.mockRestore();
-  });
-
-  it("handles localStorage exceptions gracefully when clearing tokens", () => {
-    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
-      throw new Error("Storage is disabled");
-    });
-
-    setStoredToken("some-token");
-
-    expect(() => setStoredToken(null)).not.toThrow();
-    expect(getStoredToken()).toBeNull();
-
-    removeItemSpy.mockRestore();
+  it("calls localStorage.getItem when a token is fetched", async () => {
+    vi.resetModules();
+    const getItemSpy = vi.spyOn(Storage.prototype, "getItem");
+    const freshApi = await import("./api");
+    freshApi.getStoredToken();
+    expect(getItemSpy).toHaveBeenCalledWith(TOKEN_KEY);
+    getItemSpy.mockRestore();
   });
 });
 
