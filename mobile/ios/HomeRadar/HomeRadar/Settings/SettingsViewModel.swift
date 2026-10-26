@@ -7,7 +7,8 @@ final class SettingsViewModel: ObservableObject {
     @Published var digestEmail: String = ""
     @Published var dnsUpstream: String = ""
     @Published var notificationsEnabled: Bool = false
-    @Published var dnsEnabled: Bool = false
+    /// Read-only: DNS filtering is switched on the appliance itself.
+    @Published private(set) var dnsEnabled: Bool = false
 
     @Published private(set) var isLoading = false
     @Published var errorMessage: String?
@@ -27,6 +28,7 @@ final class SettingsViewModel: ObservableObject {
             let settings = try await session.client.settings()
             apply(settings)
         } catch {
+            session.handle(error)
             errorMessage = "Couldn't load settings."
         }
     }
@@ -47,14 +49,14 @@ final class SettingsViewModel: ObservableObject {
             householdName: householdName,
             digestEmail: digestEmail,
             dnsUpstream: dnsUpstream,
-            notificationsEnabled: notificationsEnabled,
-            dnsEnabled: dnsEnabled
+            notificationsEnabled: notificationsEnabled
         )
         do {
             let settings = try await session.client.updateSettings(update)
             apply(settings)
             statusMessage = "Saved."
         } catch {
+            session.handle(error)
             errorMessage = "Couldn't save settings."
         }
     }

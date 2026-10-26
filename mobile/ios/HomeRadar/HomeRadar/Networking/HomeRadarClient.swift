@@ -183,3 +183,12 @@ final class HomeRadarClient {
         try await perform(makeRequest(path: "/health"), decoding: Health.self)
     }
 }
+
+extension Error {
+    /// True when the appliance rejected this phone's pairing token (revoked or never valid).
+    var isUnauthorized: Bool {
+        guard let clientError = self as? HomeRadarClient.ClientError,
+              case .http(let status, _) = clientError else { return false }
+        return status == 401
+    }
+}

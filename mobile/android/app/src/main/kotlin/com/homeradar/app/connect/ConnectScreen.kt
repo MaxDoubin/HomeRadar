@@ -19,6 +19,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.homeradar.core.net.HomeRadarClient
 import com.homeradar.core.net.TokenProvider
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -49,10 +51,11 @@ private object NoTokenProvider : TokenProvider {
  *
  * [onConnected] is called once the token has been saved, so the caller
  * (`DashboardViewModel`) can re-check its connection state and switch to the
- * tab UI.
+ * tab UI. [notice] explains why pairing is needed again (e.g. the appliance
+ * revoked this phone's token).
  */
 @Composable
-fun ConnectScreen(onConnected: () -> Unit) {
+fun ConnectScreen(notice: String? = null, onConnected: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val connectionStore = remember { ConnectionStore(context) }
@@ -65,6 +68,11 @@ fun ConnectScreen(onConnected: () -> Unit) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var discovered by remember { mutableStateOf(listOf<DiscoveredHost>()) }
 
+    // Re-pairing after an unpair keeps the old address, so the user only needs a new code.
+    LaunchedEffect(Unit) {
+        if (address.isBlank()) address = connectionStore.addressFlow.firstOrNull().orEmpty()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -73,6 +81,10 @@ fun ConnectScreen(onConnected: () -> Unit) {
         verticalArrangement = Arrangement.Center,
     ) {
         Text("Connect to HomeRadar", style = MaterialTheme.typography.headlineSmall)
+        notice?.let {
+            Spacer(Modifier.height(12.dp))
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
         Spacer(Modifier.height(24.dp))
 
         when (step) {
@@ -153,7 +165,7 @@ private fun AddressStep(
         value = address,
         onValueChange = onAddressChange,
         label = { Text("Appliance address") },
-        placeholder = { Text("homeradar.local:8000") },
+        placeholder = { Text("e.g. 192.168.1.20:8000") },
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )

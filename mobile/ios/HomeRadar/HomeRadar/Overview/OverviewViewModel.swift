@@ -35,6 +35,7 @@ final class OverviewViewModel: ObservableObject {
         do {
             try await session.client.triggerScan()
         } catch {
+            session.handle(error)
             scanErrorMessage = "Couldn't start a scan. Check the connection."
         }
     }

@@ -35,6 +35,12 @@ struct ConnectView: View {
             }
             .navigationTitle("Connect to HomeRadar")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // After an unpair the address is kept, so re-pairing only needs a new code.
+                if address.isEmpty, let saved = session.connectionStore.address {
+                    address = saved
+                }
+            }
         }
     }
 
@@ -42,8 +48,12 @@ struct ConnectView: View {
 
     private var addressStep: some View {
         Form {
+            if let notice = session.pairingNotice {
+                Section { Text(notice).foregroundStyle(.red) }
+            }
+
             Section("Appliance Address") {
-                TextField("homeradar.local:8000", text: $address)
+                TextField("e.g. 192.168.1.20:8000", text: $address)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)

@@ -53,7 +53,9 @@ fun discoverHomeRadarHosts(context: Context): Flow<DiscoveredHost> = callbackFlo
 
                     override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
                         val host = serviceInfo.host?.hostAddress ?: return
-                        trySend(DiscoveredHost(name = serviceInfo.serviceName, address = "$host:${serviceInfo.port}"))
+                        // IPv6 literals need brackets before the port to form a valid URL.
+                        val hostPart = if (host.contains(':')) "[$host]" else host
+                        trySend(DiscoveredHost(name = serviceInfo.serviceName, address = "$hostPart:${serviceInfo.port}"))
                     }
                 },
             )
