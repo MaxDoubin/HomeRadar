@@ -17,6 +17,7 @@ from backend.dns.blocklists import record_update_results
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
 from backend.monitor.exposure_audit import audit_all, audit_device
+from backend.monitor import habits
 from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
 from backend.maintenance import (
     backup_path,
@@ -67,7 +68,7 @@ class PairClaimRequest(BaseModel):
 
 
 class DemoAttackRequest(BaseModel):
-    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns|new_device)$")
+    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns|new_device|night_upload)$")
 
 
 class DevicePolicyUpdate(BaseModel):
@@ -161,6 +162,21 @@ def get_device_traffic_timeseries(device_id: int, hours: int = 24):
         if models.get_device(conn, device_id) is None:
             raise HTTPException(status_code=404, detail="Device not found")
         return {"hours": hours, "buckets": models.device_bandwidth_timeseries(conn, device_id, hours=hours)}
+
+
+@router.get("/devices/{device_id}/habits")
+def get_device_habits(device_id: int):
+    """What the habit model has learned about one device's normal rhythm."""
+    with get_conn() as conn:
+        if models.get_device(conn, device_id) is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return habits.profile(conn, device_id)
+
+
+@router.get("/habits/summary")
+def get_habits_summary():
+    with get_conn() as conn:
+        return habits.summary(conn)
 
 
 @router.get("/devices/{device_id}/trust")
@@ -484,9 +500,23 @@ def simulate_demo_attack(request: DemoAttackRequest):
             "SELECT id, ip, mac FROM devices ORDER BY last_seen DESC LIMIT 1"
         ).fetchone()
         device_id = device["id"] if device else None
+        habits_payload = None
+        alert_id: int | None
 
         if request.kind == "new_device":
             alert_id, device_id = _simulate_new_device(conn, device["ip"] if device else None)
+        elif request.kind == "night_upload":
+            existing = conn.execute(
+                "SELECT ip FROM devices WHERE mac = ?", (habits.DEMO_CAMERA_MAC,)
+            ).fetchone()
+            ip = existing["ip"] if existing else _demo_free_ip(conn, device["ip"] if device else None)
+            camera, result, alert_id = habits.simulate_night_upload(conn, ip)
+            device_id = camera["id"]
+            habits_payload = {
+                "score": result.score if result else None,
+                "explanation": habits.describe(camera, result) if result and result.is_anomaly else None,
+                "typical_active_hours": habits.profile(conn, device_id)["typical_active_hours"],
+            }
         elif request.kind == "malicious_dns":
             fake_ip = f"203.0.113.{random.randint(2, 254)}"  # RFC 5737 TEST-NET-3
             models.log_traffic(
@@ -529,12 +559,12 @@ def simulate_demo_attack(request: DemoAttackRequest):
             "kind": request.kind,
             "alert": dict(alert) if alert else None,
             "device": models.get_device(conn, device_id) if device_id else None,
+            "habits": habits_payload,
         }
 
 
-def _simulate_new_device(conn, near_ip: str | None) -> tuple[int, int]:
-    """Add an unrecognized smart-plug-style device in the same /24 as the
-    household's other devices and raise the same alert a real scan would."""
+def _demo_free_ip(conn, near_ip: str | None) -> str:
+    """An unused address in the same private /24 as the household's devices."""
     try:
         network = ipaddress.ip_network(f"{near_ip}/24", strict=False)
         if not network.is_private:
@@ -543,7 +573,13 @@ def _simulate_new_device(conn, near_ip: str | None) -> tuple[int, int]:
         network = ipaddress.ip_network("192.168.1.0/24")
     taken = {row["ip"] for row in conn.execute("SELECT ip FROM devices").fetchall()}
     free = [str(host) for host in network.hosts() if str(host) not in taken and host.packed[-1] >= 20]
-    ip = random.choice(free) if free else str(network.network_address + 200)
+    return random.choice(free) if free else str(network.network_address + 200)
+
+
+def _simulate_new_device(conn, near_ip: str | None) -> tuple[int, int]:
+    """Add an unrecognized smart-plug-style device in the same /24 as the
+    household's other devices and raise the same alert a real scan would."""
+    ip = _demo_free_ip(conn, near_ip)
     # 24:0A:C4 is an Espressif OUI, the chip inside many cheap smart plugs and bulbs.
     mac = "24:0A:C4:" + ":".join(f"{random.randint(0, 255):02X}" for _ in range(3))
     info = {

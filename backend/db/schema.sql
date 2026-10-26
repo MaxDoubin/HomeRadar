@@ -132,6 +132,14 @@ CREATE TABLE IF NOT EXISTS exposure_findings (
     UNIQUE(device_id, finding_key)
 );
 
+CREATE TABLE IF NOT EXISTS device_habits (
+    device_id       INTEGER PRIMARY KEY REFERENCES devices(id),
+    last_bucket     TEXT,               -- start of the last hour the habit model scored
+    last_scored_at  TEXT,
+    last_score      REAL,
+    last_explanation TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_device ON alerts(device_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_device ON traffic_logs(device_id);

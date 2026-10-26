@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from backend.db import models
+from backend.monitor import habits
 
 
 @dataclass(frozen=True)
@@ -54,55 +55,6 @@ def observe_metric(conn, device_id: int, metric: str, value: float) -> Anomaly |
     return anomaly
 
 
-def analyze_device_ml(conn, device_id: int) -> None:
-    """Uses an Isolation Forest to detect zero-day-style abnormal traffic behavior."""
-    try:
-        import numpy as np
-        from sklearn.ensemble import IsolationForest
-    except ImportError:
-        return
-
-    rows = conn.execute(
-        """SELECT
-                strftime('%Y-%m-%dT%H:00:00Z', created_at) AS hour_bucket,
-                COUNT(*) AS queries,
-                COUNT(DISTINCT domain) AS unique_domains,
-                COALESCE(SUM(bytes_sent + bytes_received), 0) AS bytes
-           FROM traffic_logs
-           WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-7 days')
-           GROUP BY hour_bucket
-           ORDER BY hour_bucket ASC""",
-        (device_id,),
-    ).fetchall()
-
-    if len(rows) < 12:
-        return
-
-    features = []
-    for row in rows:
-        features.append([float(row["queries"]), float(row["unique_domains"]), float(row["bytes"])])
-
-    X = np.array(features)
-
-    model = IsolationForest(contamination=0.05, random_state=42)
-    model.fit(X)
-
-    prediction = model.predict([X[-1]])
-
-    if prediction[0] == -1:
-        models.create_alert_once(
-            conn,
-            device_id,
-            "warning",
-            "ML Anomaly Detected",
-            (
-                f"Abnormal traffic behavior detected by ML model "
-                f"(queries: {int(X[-1][0])}, domains: {int(X[-1][1])}, bytes: {int(X[-1][2])})."
-            ),
-            window_minutes=180,
-        )
-
-
 def analyze_device(conn, device_id: int) -> list[Anomaly]:
     current = conn.execute(
         """SELECT COUNT(*) AS queries,
@@ -114,7 +66,7 @@ def analyze_device(conn, device_id: int) -> list[Anomaly]:
         (device_id,),
     ).fetchone()
 
-    analyze_device_ml(conn, device_id)
+    habits.analyze_device_habits(conn, device_id)
 
     anomalies = []
     for metric in ("queries", "unique_domains", "bytes"):

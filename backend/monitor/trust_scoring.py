@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.db import models
+from backend.monitor import habits
 from backend.monitor.anomaly_detection import analyze_device
 
 
@@ -59,6 +60,8 @@ def score_device(conn, device: dict) -> TrustResult:
     ).fetchone()[0]
     if alert_count:
         factors["unresolved alerts"] = -min(20, alert_count * 4)
+    if habits.unresolved_habit_alerts(conn, device["id"]):
+        factors["out-of-character activity"] = -10
 
     findings = conn.execute(
         """SELECT severity, COUNT(*) AS count FROM exposure_findings
