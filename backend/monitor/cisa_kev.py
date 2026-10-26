@@ -87,11 +87,12 @@ def update_catalog(conn, url: str = config.CISA_KEV_URL, timeout: float = 30) ->
 def search_catalog(conn, query: str = "", limit: int = 100) -> list[dict]:
     limit = max(1, min(limit, 500))
     if query:
-        pattern = f"%{query}%"
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         rows = conn.execute(
             """SELECT * FROM cisa_kev
-               WHERE cve_id LIKE ? OR vendor_project LIKE ? OR product LIKE ?
-                    OR vulnerability_name LIKE ?
+               WHERE cve_id LIKE ? ESCAPE '\\' OR vendor_project LIKE ? ESCAPE '\\'
+                    OR product LIKE ? ESCAPE '\\' OR vulnerability_name LIKE ? ESCAPE '\\'
                ORDER BY date_added DESC LIMIT ?""",
             (pattern, pattern, pattern, pattern, limit),
         ).fetchall()

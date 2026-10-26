@@ -166,7 +166,7 @@ def health_report(conn) -> dict:
             "listen": f"{config.DNS_HOST}:{config.DNS_PORT}",
             "upstream": conn.execute(
                 "SELECT COALESCE((SELECT value FROM settings WHERE key = 'dns_upstream'), ?)",
-                (config.DNS_UPSTREAM,),
+                (",".join(config.DNS_UPSTREAMS),),
             ).fetchone()[0],
         },
         "last_device_seen": last_seen,

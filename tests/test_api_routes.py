@@ -448,7 +448,7 @@ def test_settings_get_patch_round_trip(client, auth_headers):
     assert response.json()["household_name"] == "Kristina's House"
 
 
-def test_setup_get_post_round_trip(client):
+def test_setup_get_post_round_trip(client, auth_headers):
     response = client.get("/setup")
     assert response.status_code == 200
     assert response.json()["complete"] is False
@@ -469,8 +469,12 @@ def test_setup_get_post_round_trip(client):
     response = client.get("/setup")
     assert response.json()["complete"] is True
 
-    # Missing required household_name.
+    # Once setup is complete, re-running it needs a pairing token.
     response = client.post("/setup", json={})
+    assert response.status_code == 401
+
+    # Missing required household_name.
+    response = client.post("/setup", json={}, headers=auth_headers)
     assert response.status_code == 422
 
 
