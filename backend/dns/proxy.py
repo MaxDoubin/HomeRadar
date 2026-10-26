@@ -59,6 +59,66 @@ def blocked_response(payload: bytes) -> bytes:
     return error_response(payload, RCODE.NXDOMAIN)
 
 
+def normalize_custom_records(custom_records: str | None) -> dict[str, str]:
+    """Parse the household's custom DNS records into {lowercase name: ip}.
+
+    Keys are case-insensitive and may be written with a trailing dot; entries
+    whose value is not an IP address are ignored.
+    """
+    if not custom_records:
+        return {}
+    try:
+        records = json.loads(custom_records)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(records, dict):
+        return {}
+    normalized: dict[str, str] = {}
+    for name, value in records.items():
+        if not isinstance(name, str) or not isinstance(value, str):
+            continue
+        key = name.strip().lower().rstrip(".")
+        try:
+            ipaddress.ip_address(value.strip())
+        except ValueError:
+            continue
+        if key:
+            normalized[key] = value.strip()
+    return normalized
+
+
+_CLASSIC_UDP_LIMIT = 512
+_MAX_UDP_LIMIT = 4096
+
+
+def udp_size_limit(request_payload: bytes) -> int:
+    """Largest UDP reply the client accepts: 512 bytes, or its EDNS buffer size."""
+    try:
+        request = DNSRecord.parse(request_payload)
+    except Exception:
+        return _CLASSIC_UDP_LIMIT
+    for record in request.ar:
+        if record.rtype == QTYPE.OPT:
+            return max(_CLASSIC_UDP_LIMIT, min(int(record.rclass), _MAX_UDP_LIMIT))
+    return _CLASSIC_UDP_LIMIT
+
+
+def truncate_for_udp(request_payload: bytes, response: bytes) -> bytes:
+    """Mark replies too big for the client's UDP buffer as truncated (TC=1)
+    with no records, so the client retries over TCP instead of dropping them."""
+    if len(response) <= udp_size_limit(request_payload):
+        return response
+    try:
+        record = DNSRecord.parse(response)
+    except Exception:
+        return response
+    record.rr = []
+    record.auth = []
+    record.ar = [item for item in record.ar if item.rtype == QTYPE.OPT]
+    record.header.tc = 1
+    return record.pack()
+
+
 def client_is_allowed(client_ip: str) -> bool:
     """Refuse public-source clients unless explicitly enabled.
 
@@ -103,11 +163,19 @@ class DNSProxy:
         self._stats_lock = threading.Lock()
         self._inflight: dict[tuple, threading.Event] = {}
         self._inflight_lock = threading.Lock()
+        # Set when the listener can't start (e.g. no permission to bind port
+        # 53), so /health can say DNS protection is down instead of "healthy".
+        self.failure: str | None = None
 
     def serve_forever(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server.bind(self.address)
+            try:
+                server.bind(self.address)
+            except OSError as exc:
+                self.failure = f"DNS couldn't start on port {self.address[1]}: {exc.strerror or exc}"
+                logger.error("%s", self.failure)
+                return
             server.settimeout(0.5)
             self._socket = server
             self._tcp_thread = threading.Thread(
@@ -248,13 +316,8 @@ class DNSProxy:
         return {"cache": self.cache.stats(), "upstreams": upstreams}
 
     def _check_custom_dns(self, payload: bytes, custom_records: str | None) -> bytes | None:
-        if not custom_records:
-            return None
-        try:
-            records = json.loads(custom_records)
-        except (TypeError, ValueError):
-            return None
-        if not isinstance(records, dict):
+        records = normalize_custom_records(custom_records)
+        if not records:
             return None
 
         request = DNSRecord.parse(payload)
@@ -264,28 +327,24 @@ class DNSProxy:
         question = request.questions[0]
         domain = str(question.qname).rstrip(".").lower()
         ip_str = records.get(domain)
-        if not isinstance(ip_str, str) or not ip_str:
+        if ip_str is None:
             return None
 
-        try:
-            ip = ipaddress.ip_address(ip_str)
-        except ValueError:
-            return None
-
+        ip = ipaddress.ip_address(ip_str)
         qtype = question.qtype
         reply = request.reply()
-        added = False
         if ip.version == 4 and qtype in (QTYPE.A, QTYPE.ANY):
             reply.add_answer(
                 RR(rname=question.qname, rtype=QTYPE.A, rclass=1, ttl=300, rdata=A(ip_str))
             )
-            added = True
         elif ip.version == 6 and qtype in (QTYPE.AAAA, QTYPE.ANY):
             reply.add_answer(
                 RR(rname=question.qname, rtype=QTYPE.AAAA, rclass=1, ttl=300, rdata=AAAA(ip_str))
             )
-            added = True
-        return reply.pack() if added else None
+        # A name the household defined but asked for another record type gets an
+        # empty NOERROR (NODATA): forwarding it upstream would leak a private
+        # name and usually come back NXDOMAIN, which breaks dual-stack clients.
+        return reply.pack()
 
     def _safe_error(self, payload: bytes, rcode: int) -> bytes | None:
         try:
@@ -319,7 +378,10 @@ class DNSProxy:
         policy_blocked = household_blocked or policy_decision.blocked
 
         if policy_blocked:
-            response = self._safe_error(payload, RCODE.REFUSED)
+            # NXDOMAIN rather than REFUSED: a REFUSED answer makes many clients
+            # retry the router's secondary DNS, which would bypass bedtime and
+            # internet pauses.
+            response = self._safe_error(payload, RCODE.NXDOMAIN)
         elif decision.blocked:
             response = self._safe_error(payload, RCODE.NXDOMAIN)
         else:
@@ -370,6 +432,8 @@ class DNSProxy:
 
     def _handle(self, payload: bytes, client: tuple[str, int]) -> None:
         response = self._process(payload, client[0])
+        if response:
+            response = truncate_for_udp(payload, response)
         if response and self._socket:
             try:
                 self._socket.sendto(response, client)
@@ -379,7 +443,14 @@ class DNSProxy:
     def _serve_tcp(self) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            server.bind(self.address)
+            try:
+                server.bind(self.address)
+            except OSError as exc:
+                self.failure = (
+                    f"DNS over TCP couldn't start on port {self.address[1]}: {exc.strerror or exc}"
+                )
+                logger.error("%s", self.failure)
+                return
             server.listen(64)
             server.settimeout(0.5)
             self._tcp_socket = server

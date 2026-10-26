@@ -219,11 +219,12 @@ def test_resolve_coalesces_identical_concurrent_queries(tmp_path):
     assert all(result is not None for result in results)
 
 
-def test_process_refuses_household_blocked_device(patched_db, db_path, tmp_path):
+def test_process_blocks_household_blocked_device(patched_db, db_path, tmp_path):
     _insert_device(db_path, "AA:BB:CC:DD:EE:01", "10.0.0.5", is_authorized=2)
     proxy = DNSProxy(BlocklistManager(tmp_path / "blocklist.txt"), dynamic_upstream=False)
     response = proxy._process(DNSRecord.question("clean.example", "A").pack(), "10.0.0.5")
-    assert DNSRecord.parse(response).header.rcode == RCODE.REFUSED
+    # NXDOMAIN, not REFUSED, so the client doesn't fall back to a secondary resolver.
+    assert DNSRecord.parse(response).header.rcode == RCODE.NXDOMAIN
 
 
 def test_process_blocks_domain_and_creates_alert(patched_db, db_path, tmp_path):

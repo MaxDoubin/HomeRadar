@@ -117,7 +117,7 @@ def test_proxy_enforces_overnight_bedtime_in_household_timezone(patched_db, db_p
     monkeypatch.setattr(proxy, "_resolve", lambda p: DNSRecord.parse(p).reply().pack())
 
     fake_now.value = datetime(2026, 3, 2, 23, 30, tzinfo=LA)
-    assert DNSRecord.parse(proxy._process(payload, "10.0.0.21")).header.rcode == RCODE.REFUSED
+    assert DNSRecord.parse(proxy._process(payload, "10.0.0.21")).header.rcode == RCODE.NXDOMAIN
     assert seen["timezone"] == "America/Los_Angeles"
 
     fake_now.value = datetime(2026, 3, 3, 12, 0, tzinfo=LA)
@@ -130,7 +130,7 @@ def test_proxy_refuses_paused_device(patched_db, db_path, tmp_path):
         models.set_device_policy(conn, device_id, internet_enabled=False)
     proxy = DNSProxy(BlocklistManager(tmp_path / "blocklist.txt"), dynamic_upstream=False)
     response = proxy._process(DNSRecord.question("any.example", "A").pack(), "10.0.0.22")
-    assert DNSRecord.parse(response).header.rcode == RCODE.REFUSED
+    assert DNSRecord.parse(response).header.rcode == RCODE.NXDOMAIN
 
 
 def test_bedtime_endpoint_and_timezone_update(insights_client, patched_db, db_path, auth_headers):
