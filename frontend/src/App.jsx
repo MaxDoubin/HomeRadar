@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { api, dashboardSocket, setStoredToken } from "./api";
+import { deviceName, deviceTypeLabel, explainAlert, gradeVerdict, letterGrade, reportTips } from "./insights";
 
 const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings"];
+const DEMO_STORY = ["new_device", "deauth", "malicious_dns"];
 const deviceGlyphs = {
   phone: "▯", tablet: "▭", computer: "⌨", server: "▤", router: "⌁",
   access_point: "⌁", network_switch: "⇄", printer: "▱", iot_camera: "◉",
@@ -125,9 +127,46 @@ function NetworkMap({ devices, onSelect }) {
   </article>;
 }
 
-function Overview({ data, onNavigate, onSelect, freshAlertIds = new Set() }) {
+function SimulatedTag({ alert }) {
+  return explainAlert(alert).simulated ? <em className="sim-tag" title="Created by demo mode, not a real detection">Simulated</em> : null;
+}
+
+function AlertGuide({ alert, onAct, compact = false }) {
+  const guide = explainAlert(alert);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const act = async (state) => {
+    setBusy(state === 2 ? "block" : "trust");
+    setError("");
+    try {
+      await onAct(alert, state);
+    } catch (err) {
+      setError(err.message || "That didn't work. Try again.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const showActions = onAct && (guide.canBlock || guide.canTrust);
+  return <div className={`alert-guide${compact ? " compact" : ""}`}>
+    {compact ? <p>{guide.meaning}</p> : <>
+      <p><b>What this means</b>{guide.meaning}</p>
+      <p><b>What to do</b>{guide.action}</p>
+    </>}
+    {showActions && <div className="alert-actions">
+      {guide.canBlock && <button className="danger-button" onClick={() => act(2)} disabled={!!busy}>{busy === "block" ? "Blocking…" : "Block this device"}</button>}
+      {guide.canTrust && <button className="trust-button" onClick={() => act(1)} disabled={!!busy}>{busy === "trust" ? "Saving…" : "It's mine — trust it"}</button>}
+    </div>}
+    {error && <p className="alert-error">{error}</p>}
+  </div>;
+}
+
+function Overview({ data, onNavigate, onSelect, onAlertAction, onOpenReport, freshAlertIds = new Set() }) {
   const { status = {}, devices = [], alerts = [], traffic = {} } = data;
   const pending = devices.filter((device) => device.is_authorized === 0).length;
+  const score = status.security_score ?? 100;
+  const grade = letterGrade(score);
+  const deviceCount = status.device_count || 0;
+  const blocked = traffic.blocked || 0;
   return <>
     <section className="hero-row">
       <div>
@@ -137,10 +176,20 @@ function Overview({ data, onNavigate, onSelect, freshAlertIds = new Set() }) {
       </div>
       <div className="live"><i /> Live monitoring</div>
     </section>
+    <section className="impact-strip" aria-label="Protection summary">
+      <span>Protecting <b>{deviceCount}</b> device{deviceCount === 1 ? "" : "s"}</span>
+      <span><b>{blocked}</b> threat{blocked === 1 ? "" : "s"} blocked today</span>
+      <span><b>$0</b> / month</span>
+      {onOpenReport && <button className="report-inline" onClick={onOpenReport}>View report card</button>}
+    </section>
     <section className="overview-grid">
       <article className="score-card card">
-        <ScoreRing score={status.security_score ?? 100} />
-        <div><span>Household security</span><h2>{(status.security_score ?? 100) >= 85 ? "Looking strong" : (status.security_score ?? 100) >= 65 ? "Needs attention" : "Action recommended"}</h2><p>{status.open_alert_count || 0} open alerts across {status.device_count || 0} devices.</p></div>
+        <ScoreRing score={score} />
+        <div className="grade-block">
+          <span>Household security grade</span>
+          <div className="grade-line"><strong className={`grade ${tone(score)}`} data-testid="household-grade">{grade}</strong><h2>{gradeVerdict(grade)}</h2></div>
+          <p>{status.open_alert_count || 0} open alerts across {deviceCount} devices.</p>
+        </div>
       </article>
       <div className="stats-grid">
         <Stat label="DEVICES" value={status.device_count || 0} detail={`${pending} awaiting review`} />
@@ -157,7 +206,7 @@ function Overview({ data, onNavigate, onSelect, freshAlertIds = new Set() }) {
       <article className="card panel alert-panel">
         <header><div><span>RECENT ALERTS</span><h3>What needs your attention</h3></div><button onClick={() => onNavigate("Alerts")}>View all</button></header>
         <div className="alert-list">
-          {alerts.slice(0, 4).map((alert) => <div className={`alert-item${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><strong>{alert.title}</strong><p>{alert.description}</p></div><small>{timeAgo(alert.created_at)}</small></div>)}
+          {alerts.slice(0, 4).map((alert) => <div className={`alert-item${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><strong>{alert.title}</strong><SimulatedTag alert={alert}/><AlertGuide alert={alert} onAct={onAlertAction} compact/></div><small>{timeAgo(alert.created_at)}</small></div>)}
           {!alerts.length && <div className="empty">No active alerts. Your network is quiet.</div>}
         </div>
       </article>
@@ -228,10 +277,69 @@ function Traffic({ traffic }) {
   </section>;
 }
 
-function Alerts({ alerts, onResolve, freshAlertIds = new Set() }) {
-  return <section><div className="page-heading"><div><p className="eyebrow">ATTENTION</p><h1>Alerts</h1><p className="subtle">Prioritized security events with clear next actions.</p></div></div>
-    <article className="card panel alert-page">{alerts.map((alert) => <div className={`alert-card${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><span>{alert.severity}</span><h3>{alert.title}</h3><p>{alert.description}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div><button onClick={() => onResolve(alert.id)}>Resolve</button></div>)}{!alerts.length && <div className="empty big">No open alerts. Everything looks calm.</div>}</article>
+function Alerts({ alerts, onResolve, onAlertAction, freshAlertIds = new Set() }) {
+  return <section><div className="page-heading"><div><p className="eyebrow">ATTENTION</p><h1>Alerts</h1><p className="subtle">Every alert explained in plain English, with a one-tap fix.</p></div></div>
+    <article className="card panel alert-page">{alerts.map((alert) => <div className={`alert-card${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><span>{alert.severity}</span><SimulatedTag alert={alert}/><h3>{alert.title}</h3><AlertGuide alert={alert} onAct={onAlertAction}/><p className="alert-detail">{alert.description}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div><button onClick={() => onResolve(alert.id)}>Resolve</button></div>)}{!alerts.length && <div className="empty big">No open alerts. Everything looks calm.</div>}</article>
   </section>;
+}
+
+function ReportCard({ data, onClose }) {
+  const { status = {}, devices = [], alerts = [], traffic = {} } = data;
+  const [household, setHousehold] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    api("/settings").then((result) => { if (!cancelled) setHousehold(result?.household_name || ""); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  const score = status.security_score ?? 100;
+  const grade = letterGrade(score);
+  const pending = devices.filter((device) => device.is_authorized === 0).length;
+  const tips = reportTips({ devices, alerts });
+  const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  const stateLabel = (device) => device.is_authorized === 1 ? "Trusted" : device.is_authorized === 2 ? "Blocked" : "Needs review";
+  return <div className="report-backdrop" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <article className="report">
+      <div className="report-actions">
+        <button className="primary" onClick={() => window.print()}>Print / Save as PDF</button>
+        <button onClick={onClose}>Close</button>
+      </div>
+      <header className="report-head">
+        <div className="radar-logo"><i/><i/><i/></div>
+        <div><p className="eyebrow">HOME SECURITY REPORT CARD</p><h1 id="report-title">{household || "Your household"}</h1><p className="subtle">{today}</p></div>
+      </header>
+      <section className="report-grade">
+        <strong className={`grade ${tone(score)}`}>{grade}</strong>
+        <div><h2>{gradeVerdict(grade)}</h2><p>Security score {score}/100</p></div>
+      </section>
+      <section className="report-stats">
+        <div><strong>{status.device_count ?? devices.length}</strong><span>Devices protected</span></div>
+        <div><strong>{pending}</strong><span>Need review</span></div>
+        <div><strong>{traffic.blocked || 0}</strong><span>Threats blocked today</span></div>
+        <div><strong>{alerts.length}</strong><span>Open alerts</span></div>
+      </section>
+      <section className="report-section">
+        <h3>What needs attention</h3>
+        {alerts.slice(0, 5).map((alert) => {
+          const guide = explainAlert(alert);
+          return <div className="report-alert" key={alert.id}><b>{alert.title}{guide.simulated ? " (simulated)" : ""}</b><p>{guide.meaning}</p><p><i>What to do:</i> {guide.action}</p></div>;
+        })}
+        {!alerts.length && <p>Nothing right now. Your network is quiet.</p>}
+      </section>
+      <section className="report-section">
+        <h3>Your next 3 steps</h3>
+        <ol>{tips.map((tip) => <li key={tip}>{tip}</li>)}</ol>
+      </section>
+      <section className="report-section">
+        <h3>Devices on your network</h3>
+        <table className="report-table">
+          <thead><tr><th>Device</th><th>Type</th><th>Status</th><th>Trust</th></tr></thead>
+          <tbody>{devices.map((device) => <tr key={device.id}><td>{deviceName(device)}</td><td>{deviceTypeLabel(device.device_type)}</td><td>{stateLabel(device)}</td><td>{device.trust_score ?? "-"}</td></tr>)}</tbody>
+        </table>
+        {!devices.length && <p>No devices discovered yet. Run a scan first.</p>}
+      </section>
+      <footer className="report-foot">Generated by Home Radar, free and open-source home network security. Your network data stays on your own appliance.</footer>
+    </article>
+  </div>;
 }
 
 function SetupWizard({ onComplete }) {
@@ -255,7 +363,7 @@ function SetupWizard({ onComplete }) {
   </section></div>;
 }
 
-function Settings({ onRefreshDashboard }) {
+function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
   const [form, setForm] = useState({});
   const [message, setMessage] = useState("");
   const [health, setHealth] = useState(null);
@@ -483,12 +591,15 @@ function Settings({ onRefreshDashboard }) {
     <aside className="card system-card pairing-card">
       <p className="eyebrow">LIVE DEMO</p>
       <h2>Simulate an attack</h2>
-      <p className="subtle">Trigger a real, dashboard-visible alert to show how Home Radar reacts — no real attack traffic needed.</p>
+      <p className="subtle">Trigger a real, dashboard-visible alert to show how Home Radar reacts — no real attack traffic needed. Every simulated alert is labeled as simulated.</p>
       <div className="demo-actions">
+        <button className="primary" onClick={() => onPlayDemoStory?.()} disabled={!!demoBusy || demoStory.running}>{demoStory.running ? "Demo story playing…" : "Play demo story"}</button>
+        <small className="subtle">A new device joins, then two attacks arrive, about five seconds apart, on the Overview page.</small>
         <button onClick={() => simulateAttack("deauth")} disabled={!!demoBusy}>{demoBusy === "deauth" ? "Triggering…" : "Simulate Wi-Fi deauth attack"}</button>
         <button onClick={() => simulateAttack("malicious_dns")} disabled={!!demoBusy}>{demoBusy === "malicious_dns" ? "Triggering…" : "Simulate malicious connection"}</button>
       </div>
       {demoMsg && <p className={demoMsg.startsWith("Error") || demoMsg.startsWith("Demo mode") ? "health-warning" : "good"}>{demoMsg}</p>}
+      {demoStory.message && <p className="health-warning">{demoStory.message}</p>}
     </aside></div>
   </section>;
 }
@@ -502,6 +613,18 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState(true);
   const [freshAlertIds, setFreshAlertIds] = useState(() => new Set());
   const [scanMessage, setScanMessage] = useState("");
+  const [showReport, setShowReport] = useState(false);
+  const [demoStory, setDemoStory] = useState({ running: false, step: 0, message: "" });
+  const storyTimer = useRef(null);
+  const storyCancelled = useRef(false);
+  useEffect(() => {
+    storyCancelled.current = false;
+    return () => { storyCancelled.current = true; clearTimeout(storyTimer.current); };
+  }, []);
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [page]);
   const seenAlerts = useRef(new Set());
   const alertsInitialized = useRef(false);
   const load = () => api("/dashboard").then(setData).catch(() => setConnected(false));
@@ -560,23 +683,57 @@ export default function App() {
     }
   };
   const resolve = async (id) => { await api(`/alerts/${id}`, {method:"PATCH", body:JSON.stringify({resolved:true})}); await load(); };
+  const actOnAlertDevice = async (alert, state) => {
+    try {
+      await api(`/devices/${alert.device_id}/authorization`, { method: "PATCH", body: JSON.stringify({ state }) });
+      await api(`/alerts/${alert.id}`, { method: "PATCH", body: JSON.stringify({ resolved: true }) });
+    } finally {
+      await load();
+    }
+  };
+  const playDemoStory = async () => {
+    if (demoStory.running) return;
+    setPage("Overview");
+    setDemoStory({ running: true, step: 0, message: "" });
+    try {
+      for (let index = 0; index < DEMO_STORY.length; index += 1) {
+        await new Promise((done) => { storyTimer.current = setTimeout(done, index === 0 ? 1500 : 5000); });
+        if (storyCancelled.current) return;
+        setDemoStory({ running: true, step: index + 1, message: "" });
+        await api("/demo/simulate-attack", { method: "POST", body: JSON.stringify({ kind: DEMO_STORY[index] }) });
+        await load();
+      }
+      setDemoStory({ running: false, step: 0, message: "" });
+    } catch (err) {
+      setDemoStory({
+        running: false,
+        step: 0,
+        message: err.status === 404
+          ? "Demo story stopped: demo mode isn't enabled on this appliance."
+          : `Demo story stopped: ${err.message}`,
+      });
+    }
+  };
   const title = useMemo(() => page === "Overview" ? "Command center" : page, [page]);
-  return <div className="shell">
+  const topbarMessage = demoStory.message || scanMessage;
+  return <><div className="shell">
     <aside className="sidebar">
       <div className="brand"><div className="radar-logo"><i/><i/><i/></div><div><strong>Home<span>Radar</span></strong><small>NETWORK DEFENSE</small></div></div>
       <nav>{NAV.map((item) => <button className={page === item ? "active" : ""} onClick={() => setPage(item)} key={item}><Icon name={item.toLowerCase()}/><span>{item}</span>{item === "Alerts" && data.alerts?.length > 0 && <b>{data.alerts.length}</b>}</button>)}</nav>
       <div className="appliance-status"><span><i className={connected ? "online" : ""}/>{connected ? "Appliance online" : "Reconnecting…"}</span><small>{data.status?.blocklist_domains || 0} blocked domains</small></div>
     </aside>
-    <main><header className="topbar"><span>{title}</span><div>{scanMessage && <span className={`scan-result ${scanMessage.startsWith("Scan failed") ? "danger" : ""}`}>{scanMessage}</span>}<button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{data.status?.security_score ?? 100}</span></div></header>
+    <main><header className="topbar"><span>{title}</span><div>{demoStory.running && <span className="story-chip">Demo story · {demoStory.step}/{DEMO_STORY.length} · simulated</span>}{topbarMessage && <span className={`scan-result ${topbarMessage.startsWith("Scan failed") || topbarMessage.startsWith("Demo story stopped") ? "danger" : ""}`}>{topbarMessage}</span>}<button className="report-button" onClick={() => setShowReport(true)}>Report card</button><button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{letterGrade(data.status?.security_score ?? 100)}</span></div></header>
       <div className="content">
-        {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected} freshAlertIds={freshAlertIds}/>}
+        {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected} onAlertAction={actOnAlertDevice} onOpenReport={() => setShowReport(true)} freshAlertIds={freshAlertIds}/>}
         {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy}/>}
         {page === "Traffic" && <Traffic traffic={data.traffic || {}}/>}
-        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} freshAlertIds={freshAlertIds}/>}
-        {page === "Settings" && <Settings onRefreshDashboard={load}/>}
+        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} onAlertAction={actOnAlertDevice} freshAlertIds={freshAlertIds}/>}
+        {page === "Settings" && <Settings onRefreshDashboard={load} onPlayDemoStory={playDemoStory} demoStory={demoStory}/>}
       </div>
     </main>
     <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }}/>
     {!setupComplete && <SetupWizard onComplete={()=>setSetupComplete(true)}/>}
-  </div>;
+  </div>
+  {showReport && <ReportCard data={{ ...data, alerts: data.alerts || [] }} onClose={() => setShowReport(false)}/>}
+  </>;
 }

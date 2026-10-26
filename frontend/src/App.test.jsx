@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // vi.hoisted() gives us mock fns that exist before vi.mock's factory (which is hoisted
@@ -530,6 +530,163 @@ describe("Settings simulate-attack panel", () => {
     await user.click(screen.getByRole("button", { name: /simulate wi-fi deauth attack/i }));
 
     await screen.findByText(/demo mode isn't enabled on this appliance/i);
+  });
+});
+
+// ---- Household grade, plain-English alerts, report card, demo story -------
+
+const alertNewDevice = {
+  id: 103,
+  device_id: devicePending.id,
+  title: "New device connected",
+  description: "Espressif joined the network. (Simulated for demonstration.)",
+  severity: "warning",
+  is_resolved: 0,
+  created_at: new Date().toISOString(),
+};
+
+function withDashboard(overrides) {
+  mocks.api.mockImplementation((path, options = {}) => {
+    if (path === "/dashboard") return Promise.resolve({ ...clone(dashboardFixture), ...clone(overrides) });
+    return defaultApiImpl(path, options);
+  });
+}
+
+describe("Household letter grade", () => {
+  it("shows a letter grade and the protection summary on Overview", async () => {
+    await renderApp();
+    expect(await screen.findByTestId("household-grade")).toHaveTextContent("B+");
+    expect(screen.getByText(/solid, with a few things worth reviewing/i)).toBeInTheDocument();
+    const strip = screen.getByLabelText(/protection summary/i);
+    expect(strip).toHaveTextContent(/protecting 2 devices/i);
+    expect(strip).toHaveTextContent(/5 threats blocked today/i);
+    expect(strip).toHaveTextContent(/\$0 \/ month/i);
+  });
+});
+
+describe("Plain-English alerts", () => {
+  async function openAlerts() {
+    withDashboard({ alerts: [alertNewDevice, alertOpen2] });
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /alerts/i }));
+    const card = (await screen.findByRole("heading", { name: alertNewDevice.title })).closest(".alert-card");
+    return { user, card };
+  }
+
+  it("explains what the alert means, what to do, and labels simulated alerts", async () => {
+    const { card } = await openAlerts();
+    expect(within(card).getByText(/what this means/i)).toBeInTheDocument();
+    expect(within(card).getByText(/hasn't approved/i)).toBeInTheDocument();
+    expect(within(card).getByText(/what to do/i)).toBeInTheDocument();
+    expect(within(card).getByText(/^simulated$/i)).toBeInTheDocument();
+  });
+
+  it("blocks the device in one tap, then resolves the alert and refreshes", async () => {
+    const { user, card } = await openAlerts();
+    const dashboardCallsBefore = mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length;
+    await user.click(within(card).getByRole("button", { name: /block this device/i }));
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === `/devices/${devicePending.id}/authorization`);
+      expect(auth).toBeTruthy();
+      expect(auth[1].method).toBe("PATCH");
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 2 });
+      const resolveCall = mocks.api.mock.calls.find((c) => c[0] === `/alerts/${alertNewDevice.id}`);
+      expect(JSON.parse(resolveCall[1].body)).toEqual({ resolved: true });
+    });
+    await waitFor(() => {
+      expect(mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length).toBeGreaterThan(dashboardCallsBefore);
+    });
+  });
+
+  it("trusts the device when the family recognizes it", async () => {
+    const { user, card } = await openAlerts();
+    await user.click(within(card).getByRole("button", { name: /it's mine/i }));
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === `/devices/${devicePending.id}/authorization`);
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 1 });
+    });
+  });
+
+  it("does not offer device actions for alerts without a device", async () => {
+    await openAlerts();
+    const other = screen.getByRole("heading", { name: alertOpen2.title }).closest(".alert-card");
+    expect(within(other).queryByRole("button", { name: /block this device/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("Home Security Report Card", () => {
+  it("opens a printable report with the grade, alerts, steps, and devices", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    withDashboard({ alerts: [alertNewDevice] });
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^report card$/i }));
+
+    const report = await screen.findByRole("dialog", { name: /test home/i });
+    expect(within(report).getByText("B+")).toBeInTheDocument();
+    expect(within(report).getByText(/new device connected \(simulated\)/i)).toBeInTheDocument();
+    expect(within(report).getByText(/review 1 new device/i)).toBeInTheDocument();
+    expect(within(report).getByText("kitchen-echo")).toBeInTheDocument();
+
+    await user.click(within(report).getByRole("button", { name: /print \/ save as pdf/i }));
+    expect(print).toHaveBeenCalled();
+
+    await user.click(within(report).getByRole("button", { name: /^close$/i }));
+    expect(screen.queryByRole("dialog", { name: /test home/i })).not.toBeInTheDocument();
+    print.mockRestore();
+  });
+});
+
+describe("Demo story", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function openDemoPanel() {
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /settings/i }));
+    return screen.findByRole("button", { name: /play demo story/i });
+  }
+
+  const storyCalls = () => mocks.api.mock.calls
+    .filter((c) => c[0] === "/demo/simulate-attack")
+    .map((c) => JSON.parse(c[1].body).kind);
+
+  it("jumps to Overview and fires new_device, deauth, then malicious_dns a few seconds apart", async () => {
+    const button = await openDemoPanel();
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    expect(screen.getByRole("heading", { name: /your network at a glance/i })).toBeInTheDocument();
+    expect(storyCalls()).toEqual([]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    expect(storyCalls()).toEqual(["new_device"]);
+    expect(screen.getByText(/demo story · 1\/3 · simulated/i)).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(storyCalls()).toEqual(["new_device", "deauth"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(storyCalls()).toEqual(["new_device", "deauth", "malicious_dns"]);
+    expect(screen.queryByText(/demo story ·/i)).not.toBeInTheDocument();
+  });
+
+  it("stops and explains why when demo mode is off", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/demo/simulate-attack") {
+        const error = new Error("Not found");
+        error.status = 404;
+        return Promise.reject(error);
+      }
+      return defaultApiImpl(path, options);
+    });
+    const button = await openDemoPanel();
+    vi.useFakeTimers();
+    fireEvent.click(button);
+    await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+    expect(storyCalls()).toEqual(["new_device"]);
+    expect(screen.getByText(/demo story stopped: demo mode isn't enabled/i)).toBeInTheDocument();
   });
 });
 
