@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceTypeLabel, explainAlert, friendlyError, gradeVerdict, letterGrade, overviewHeadline, plural, reportTips, vendorHint } from "./insights";
+import { deviceTypeLabel, explainAlert, formatClock, friendlyError, gradeVerdict, letterGrade, overviewHeadline, plural, reportTips, vendorHint, vulnerabilitySummary } from "./insights";
 
 describe("deviceTypeLabel", () => {
   it("formats device types for people, keeping acronyms intact", () => {
@@ -108,5 +108,55 @@ describe("copy helpers", () => {
   it("turns developer errors into calm household language", () => {
     expect(friendlyError("SMTP host, sender, and recipient must be configured")).toMatch(/weekly email is off/i);
     expect(friendlyError("<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED]>")).toMatch(/couldn't update just now/i);
+  });
+});
+
+describe("formatClock", () => {
+  it("turns 24-hour times into friendly 12-hour times", () => {
+    expect(formatClock("21:00")).toBe("9:00 PM");
+    expect(formatClock("07:00:00")).toBe("7:00 AM");
+    expect(formatClock("00:30")).toBe("12:30 AM");
+    expect(formatClock("12:05")).toBe("12:05 PM");
+  });
+
+  it("returns nothing for values that aren't times", () => {
+    expect(formatClock("25:99")).toBe("");
+    expect(formatClock(null)).toBe("");
+  });
+});
+
+describe("vulnerabilitySummary", () => {
+  it("talks about the maker's products, not this device", () => {
+    const text = vulnerabilitySummary({ status: "catalog_matches", kev_count: 1, brand: "TP-Link", advice: "x" });
+    expect(text).toBe("1 known exploited vulnerability affects products from TP-Link.");
+    expect(text).not.toMatch(/your device/i);
+  });
+
+  it("falls back to the server's advice for everything else", () => {
+    expect(vulnerabilitySummary({ status: "chip_maker", kev_count: 0, advice: "Espressif makes network chips." })).toBe("Espressif makes network chips.");
+  });
+});
+
+describe("reportTips with household insights", () => {
+  it("adds a real vulnerability step and a bedtime suggestion", () => {
+    const tips = reportTips({
+      devices: [{ id: 1, device_type: "tablet", is_authorized: 1, trust_score: 90, hostname: "Kids tablet" }],
+      alerts: [],
+      extras: {
+        vulnerabilities: { devices: [{ name: "Router", status: "catalog_matches", kev_count: 2, brand: "NETGEAR" }] },
+        bedtime: { devices: [] },
+      },
+    });
+    expect(tips[0]).toMatch(/update router: 2 known exploited vulnerabilities affect products from NETGEAR/i);
+    expect(tips.some((tip) => /set a bedtime/i.test(tip))).toBe(true);
+  });
+});
+
+describe("overviewHeadline counts", () => {
+  it("uses the real open-alert count, not just the critical ones", () => {
+    const alerts = [{ severity: "critical" }, { severity: "warn" }, { severity: "warn" }];
+    expect(overviewHeadline({ alerts, devices: [], openAlerts: 3 }).text).toMatch(/caught something\. 3\salerts need you/i);
+    expect(overviewHeadline({ alerts: [{ severity: "warn" }], devices: [], openAlerts: 4 }).text).toMatch(/4\salerts need your review/i);
+    expect(overviewHeadline({ alerts: [{ severity: "warn" }], devices: [{ is_authorized: 0 }] }).text).toMatch(/1\salert needs your review/i);
   });
 });

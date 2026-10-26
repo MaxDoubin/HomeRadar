@@ -3,7 +3,10 @@ import { api, dashboardSocket, setStoredToken } from "./api";
 import { DeviceIcon, Icon } from "./icons";
 import LiveView, { HabitProfile, SCENARIOS, timeAgo } from "./LiveView";
 import {
-  deviceName, deviceTypeLabel, explainAlert, friendlyError, gradeVerdict, letterGrade,
+  BedtimeCard, DeviceBedtime, DevicePrivacy, DeviceVulnerabilities, Privacy, SecurityChecksCard,
+} from "./Household";
+import {
+  deviceName, deviceTypeLabel, explainAlert, formatClock, friendlyError, gradeVerdict, letterGrade,
   overviewHeadline, plural, reportTips,
 } from "./insights";
 
@@ -12,7 +15,9 @@ const NAV = [
   { id: "Live", label: "Live view", icon: "live" },
   { id: "Devices", label: "Devices", icon: "devices" },
   { id: "Alerts", label: "Alerts", icon: "alerts" },
-  { id: "Traffic", label: "Traffic", icon: "traffic" },
+  { id: "Privacy", label: "Privacy", icon: "privacy" },
+  // Reachable from the Privacy page on phones, where the bottom bar has no room.
+  { id: "Traffic", label: "Traffic", icon: "traffic", secondary: true },
   { id: "Settings", label: "Settings", icon: "settings" },
 ];
 const DEMO_STORY = SCENARIOS.map((scenario) => scenario.kind);
@@ -131,15 +136,28 @@ function AlertGuide({ alert, onAct }) {
   </div>;
 }
 
+function useHouseholdChecks(deviceCount) {
+  const [bedtime, setBedtime] = useState(null);
+  const [vulnerabilities, setVulnerabilities] = useState(null);
+  const loadVulnerabilities = () => api("/vulnerabilities").then(setVulnerabilities).catch(() => setVulnerabilities(null));
+  useEffect(() => {
+    api("/bedtime").then(setBedtime).catch(() => setBedtime(null));
+    loadVulnerabilities();
+  }, [deviceCount]);
+  return { bedtime, vulnerabilities, loadVulnerabilities };
+}
+
 function Overview({ data, onNavigate, onSelect, onOpenReport, freshAlertIds = new Set() }) {
   const { status = {}, devices = [], traffic = {} } = data;
+  const checks = useHouseholdChecks(devices.length);
+  const openDevice = (id) => { const match = devices.find((device) => device.id === id); if (match) onSelect(match); };
   const alerts = data.alerts || [];
   const score = status.security_score ?? 100;
   const grade = letterGrade(score);
   const deviceCount = status.device_count ?? devices.length;
   const blocked = traffic.blocked || 0;
   const openAlerts = status.open_alert_count ?? alerts.length;
-  const headline = overviewHeadline({ alerts, devices, score });
+  const headline = overviewHeadline({ alerts, devices, score, openAlerts: status.open_alert_count });
   return <div className="overview" data-testid="overview">
     <section className="overview-hero">
       <h1 className={`headline ${headline.tone}`}>{headline.text}</h1>
@@ -189,6 +207,11 @@ function Overview({ data, onNavigate, onSelect, onOpenReport, freshAlertIds = ne
       </article>
     </section>
 
+    <section className="overview-columns even">
+      <SecurityChecksCard vulnerabilities={checks.vulnerabilities} onRefresh={checks.loadVulnerabilities} />
+      <BedtimeCard bedtime={checks.bedtime} onOpenDevice={openDevice} />
+    </section>
+
     <article className="panel devices-panel">
       <header><h2>Devices on your network</h2><button className="text-button" onClick={() => onNavigate("Devices")}>See all {devices.length}</button></header>
       {devices.slice(0, 6).map((device) => <DeviceRow key={device.id} device={device} onSelect={onSelect} />)}
@@ -221,10 +244,12 @@ function DeviceDrawer({ device, onClose, onUpdate }) {
   const [policy, setPolicy] = useState(null);
   const [findings, setFindings] = useState([]);
   const [saved, setSaved] = useState("");
+  const [policyError, setPolicyError] = useState("");
   const [habits, setHabits] = useState(null);
   useEffect(() => {
     if (!device) return;
     setSaved("");
+    setPolicyError("");
     setHabits(null);
     api(`/devices/${device.id}/habits`).then((result) => setHabits(result?.status ? result : null)).catch(() => setHabits(null));
     api(`/devices/${device.id}/trust`).then(setTrust).catch(() => {});
@@ -239,8 +264,14 @@ function DeviceDrawer({ device, onClose, onUpdate }) {
     onUpdate(updated);
   };
   const savePolicy = async () => {
-    setPolicy(await api(`/devices/${device.id}/policy`, { method: "PUT", body: JSON.stringify(policy) }));
-    setSaved("Saved");
+    setPolicyError("");
+    try {
+      setPolicy(await api(`/devices/${device.id}/policy`, { method: "PUT", body: JSON.stringify(policy) }));
+      setSaved("Saved");
+    } catch (err) {
+      setSaved("");
+      setPolicyError(err.message || "Couldn't save. Try again.");
+    }
   };
   return <div className="drawer-backdrop" onClick={onClose}><aside className="drawer" role="dialog" aria-modal="true" aria-label={deviceName(device)} onClick={(e) => e.stopPropagation()}>
     <button className="close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
@@ -263,12 +294,15 @@ function DeviceDrawer({ device, onClose, onUpdate }) {
         : <p className="subtle">Still learning: {habits.samples ?? 0} of {habits.samples_needed ?? 48} hours observed. Home Radar learns each device's normal routine before judging it.</p>}
     </section>}
     <section><h3>Why this trust score</h3>{trust?.reasons?.length ? <ul className="reasons">{trust.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : <p className="subtle">{trust ? "No notable signals yet." : "Calculating…"}</p>}</section>
+    {policy && <DeviceBedtime device={device} policy={policy} onPolicySaved={setPolicy} />}
     {policy && <section><h3>Internet access</h3>
       <label className="toggle-row"><span><b>Allow internet</b><small>Turn off to pause this device's internet lookups.</small></span><input type="checkbox" checked={policy.internet_enabled} onChange={(e) => setPolicy({ ...policy, internet_enabled: e.target.checked })} /></label>
-      <div className="policy-times"><label><span>Quiet hours from</span><input type="time" value={policy.block_start || ""} onChange={(e) => setPolicy({ ...policy, block_start: e.target.value || null })} /></label><label><span>Until</span><input type="time" value={policy.block_end || ""} onChange={(e) => setPolicy({ ...policy, block_end: e.target.value || null })} /></label></div>
       <label className="field"><span>Blocked websites, separated by commas</span><input value={(policy.blocked_domains || []).join(", ")} onChange={(e) => setPolicy({ ...policy, blocked_domains: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} placeholder="example.com, social.example" /></label>
+      {policyError && <p className="inline-error">{policyError}</p>}
       <div className="row-end"><span className="good-text">{saved}</span><button onClick={savePolicy}>Save</button></div>
     </section>}
+    <DeviceVulnerabilities deviceId={device.id} />
+    <DevicePrivacy deviceId={device.id} />
     <section><h3>Exposure check</h3>{findings.map((finding) => <div className={`finding ${finding.severity}`} key={finding.id}><b>{finding.title}</b><p>{finding.description}</p><small>{finding.recommendation}</small></div>)}{!findings.length && <p className="subtle">Nothing risky found on this device.</p>}</section>
     <section><h3>Recent websites</h3>{traffic.slice(0, 8).map((item) => <p className="traffic-line" key={item.id}><span className="mono">{item.domain || item.dest_ip}</span><b className={item.was_blocked ? "danger-text" : "subtle"}>{item.was_blocked ? "Blocked" : "Allowed"}</b></p>)}{!traffic.length && <p className="subtle">No activity recorded yet.</p>}</section>
   </aside></div>;
@@ -318,15 +352,27 @@ function Alerts({ alerts, onResolve, onAlertAction, freshAlertIds = new Set() })
 function ReportCard({ data, onClose }) {
   const { status = {}, devices = [], alerts = [], traffic = {} } = data;
   const [household, setHousehold] = useState("");
+  const [extras, setExtras] = useState({});
   useEffect(() => {
     let cancelled = false;
     api("/settings").then((result) => { if (!cancelled) setHousehold(result?.household_name || ""); }).catch(() => {});
+    const sources = { vulnerabilities: "/vulnerabilities", privacy: "/privacy/report?hours=24", bedtime: "/bedtime" };
+    Promise.allSettled(Object.values(sources).map((path) => api(path))).then((results) => {
+      if (cancelled) return;
+      const loaded = {};
+      Object.keys(sources).forEach((key, index) => { if (results[index].status === "fulfilled") loaded[key] = results[index].value; });
+      setExtras(loaded);
+    });
     return () => { cancelled = true; };
   }, []);
   const score = status.security_score ?? 100;
   const grade = letterGrade(score);
   const pending = devices.filter((device) => device.is_authorized === 0).length;
-  const tips = reportTips({ devices, alerts });
+  const tips = reportTips({ devices, alerts, extras });
+  const privacyTotals = extras.privacy?.totals;
+  const topCompany = extras.privacy?.top_companies?.[0]?.company;
+  const vulnerable = (extras.vulnerabilities?.devices || []).filter((entry) => entry.status === "catalog_matches" && entry.kev_count > 0);
+  const bedtimes = extras.bedtime?.devices || [];
   const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
   return <div className="report-backdrop" role="dialog" aria-modal="true" aria-labelledby="report-title">
     <article className="report">
@@ -356,6 +402,19 @@ function ReportCard({ data, onClose }) {
         })}
         {!alerts.length && <p>Nothing right now. Your network is quiet.</p>}
       </section>
+      {(privacyTotals?.dns_queries > 0 || extras.vulnerabilities?.status || bedtimes.length > 0) && <section className="report-section" data-testid="report-privacy-security">
+        <h3>Privacy and security</h3>
+        <ul className="report-list">
+          {privacyTotals?.dns_queries > 0 && <li>{privacyTotals.tracker_requests
+            ? `Your devices contacted ${plural(privacyTotals.companies || 0, "tracking company", "tracking companies")} ${Number(privacyTotals.tracker_requests).toLocaleString()} times in the last 24 hours${topCompany ? `, most often ${topCompany}` : ""}. Home Radar blocked ${Number(privacyTotals.blocked_requests || 0).toLocaleString()} of them.`
+            : "None of your devices contacted a known tracking company in the last 24 hours."}</li>}
+          {extras.vulnerabilities?.status === "catalog_empty" && <li>{extras.vulnerabilities.message}</li>}
+          {extras.vulnerabilities?.status === "ok" && <li>{vulnerable.length
+            ? `${plural(vulnerable.length, "device comes", "devices come")} from makers with actively exploited vulnerabilities on CISA's list: ${vulnerable.map((entry) => entry.name).join(", ")}. That doesn't mean they're affected; keep their software up to date.`
+            : "No device matched a maker on CISA's list of actively exploited vulnerabilities."}</li>}
+          {bedtimes.map((entry) => <li key={entry.device_id}>Bedtime for {entry.name}: {formatClock(entry.block_start) && formatClock(entry.block_end) ? `every night, ${formatClock(entry.block_start)} to ${formatClock(entry.block_end)}` : entry.summary}.</li>)}
+        </ul>
+      </section>}
       <section className="report-section">
         <h3>Your next 3 steps</h3>
         <ol>{tips.map((tip) => <li key={tip}>{tip}</li>)}</ol>
@@ -422,6 +481,9 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
   const [cisaNotice, setCisaNotice] = useState(null);
   const [demoBusy, setDemoBusy] = useState("");
   const [demoMsg, setDemoMsg] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [formError, setFormError] = useState("");
+  const [blocklistNotice, setBlocklistNotice] = useState(null);
   const refreshSystem = () => {
     api("/health").then(setHealth).catch(() => {});
     api("/backups").then((result) => setBackups(result?.backups || [])).catch(() => {});
@@ -432,8 +494,18 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
   const updateBlocklists = async () => {
     setBlocklistBusy(true);
     setBlocklistError("");
+    setBlocklistNotice(null);
     try {
-      setBlocklists(await api("/blocklists/update", { method: "POST" }));
+      const result = await api("/blocklists/update", { method: "POST" });
+      setBlocklists((current) => ({ ...current, ...result }));
+      if (result?.message) {
+        const failures = (result.sources || []).filter((source) => source.ok === false);
+        setBlocklistNotice({
+          tone: result.ok === false ? "warn" : "good",
+          text: result.message,
+          detail: failures.map((source) => `${source.url || source.source}: ${source.error_detail || source.error || source.error_friendly}`).join("\n") || undefined,
+        });
+      }
     } catch (err) {
       setBlocklistError(err.message || "Update failed");
     } finally {
@@ -494,8 +566,40 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
     if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
       await Notification.requestPermission();
     }
-    setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
-    setMessage("Saved");
+    setMessage("");
+    setFieldErrors({});
+    setFormError("");
+    try {
+      setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
+      setMessage("Saved");
+    } catch (err) {
+      const fields = err.fields || {};
+      setFieldErrors(fields);
+      setFormError(Object.keys(fields).length ? "Fix the highlighted fields, then save again." : (err.message || "Couldn't save. Try again."));
+    }
+  };
+  const loadHouseholdActivity = async () => {
+    setDemoBusy("household");
+    setDemoMsg("");
+    try {
+      const result = await api("/demo/household-activity", { method: "POST" });
+      const bedtimeDevice = (result?.devices || []).find((item) => item.device_id === result?.bedtime?.device_id);
+      const parts = [
+        plural(result?.devices?.length || 0, "device"),
+        `${Number(result?.dns_queries || 0).toLocaleString()} website lookups`,
+      ];
+      if (bedtimeDevice) parts.push(`a ${formatClock(result.bedtime.block_start)} bedtime for ${bedtimeDevice.name}`);
+      setDemoMsg(`Added simulated activity: ${parts.join(", ")}. Everything added is labeled as simulated.`);
+      await onRefreshDashboard?.();
+    } catch (err) {
+      setDemoMsg(
+        err.status === 404
+          ? "Demo mode isn't enabled on this appliance. Set HOMERADAR_DEMO_MODE=true to turn it on."
+          : `Error: ${err.message}`,
+      );
+    } finally {
+      setDemoBusy("");
+    }
   };
   const startPairing = async () => {
     setPairBusy(true);
@@ -547,14 +651,14 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
     <div className="settings-group">
       <h2>Household</h2>
       <form className="panel settings-form" onSubmit={save}>
-        <label className="field"><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({ ...form, household_name: e.target.value })} /></label>
-        <label className="field"><span>Weekly summary email</span><input type="email" value={form.digest_email || ""} onChange={(e) => setForm({ ...form, digest_email: e.target.value })} placeholder="family@example.com" /></label>
-        <label className="field"><span>Upstream DNS</span><input value={form.dns_upstream || ""} onChange={(e) => setForm({ ...form, dns_upstream: e.target.value })} /></label>
+        <label className="field"><span>Household name</span><input aria-invalid={!!fieldErrors.household_name} value={form.household_name || ""} onChange={(e) => setForm({ ...form, household_name: e.target.value })} />{fieldErrors.household_name && <small className="field-error">{fieldErrors.household_name}</small>}</label>
+        <label className="field"><span>Weekly summary email</span><input type="email" aria-invalid={!!fieldErrors.digest_email} value={form.digest_email || ""} onChange={(e) => setForm({ ...form, digest_email: e.target.value })} placeholder="family@example.com" />{fieldErrors.digest_email && <small className="field-error">{fieldErrors.digest_email}</small>}</label>
+        <label className="field"><span>Upstream DNS</span><input aria-invalid={!!fieldErrors.dns_upstream} value={form.dns_upstream || ""} onChange={(e) => setForm({ ...form, dns_upstream: e.target.value })} />{fieldErrors.dns_upstream && <small className="field-error">{fieldErrors.dns_upstream}</small>}</label>
         <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while this page is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({ ...form, notifications_enabled: e.target.checked })} /></label>
         <details className="advanced"><summary>Advanced: custom DNS records</summary>
-          <label className="field"><span>Names Home Radar should answer itself (JSON)</span><textarea className="mono" value={form.custom_dns_records || "{}"} onChange={(e) => setForm({ ...form, custom_dns_records: e.target.value })} placeholder='{"printer.lan": "192.168.1.20"}' /></label>
+          <label className="field"><span>Names Home Radar should answer itself (JSON)</span><textarea className="mono" aria-invalid={!!fieldErrors.custom_dns_records} value={form.custom_dns_records || "{}"} onChange={(e) => setForm({ ...form, custom_dns_records: e.target.value })} placeholder='{"printer.lan": "192.168.1.20"}' />{fieldErrors.custom_dns_records && <small className="field-error">{fieldErrors.custom_dns_records}</small>}</label>
         </details>
-        <div className="row-end"><span className="good-text">{message}</span><button className="primary">Save settings</button></div>
+        <div className="row-end">{formError ? <span className="danger-text" role="alert">{formError}</span> : <span className="good-text">{message}</span>}<button className="primary">Save settings</button></div>
       </form>
     </div>
 
@@ -566,6 +670,7 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
           <button onClick={updateBlocklists} disabled={blocklistBusy}>{blocklistBusy ? "Updating…" : "Update now"}</button>
         </div>
         <Notice tone="warn" text={blocklistError && friendlyError(blocklistError, "update")} detail={blocklistError} />
+        <Notice {...(blocklistNotice || {})} />
         <div className="setting-row stacked">
           <div><b>Known exploited vulnerabilities</b><p className="subtle">Search the U.S. government's CISA list of security flaws attackers are actively using.</p></div>
           <form className="inline-form" onSubmit={searchCisa}>
@@ -629,8 +734,9 @@ function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
             <button className="primary" onClick={() => onPlayDemoStory?.()} disabled={!!demoBusy || demoStory.running}><Icon name="play" />{demoStory.running ? "Demo story playing…" : "Play demo story"}</button>
             <button onClick={() => simulateAttack("deauth")} disabled={!!demoBusy}>{demoBusy === "deauth" ? "Triggering…" : "Simulate Wi-Fi deauth attack"}</button>
             <button onClick={() => simulateAttack("malicious_dns")} disabled={!!demoBusy}>{demoBusy === "malicious_dns" ? "Triggering…" : "Simulate malicious connection"}</button>
+            <button onClick={loadHouseholdActivity} disabled={!!demoBusy}>{demoBusy === "household" ? "Loading…" : "Load sample household activity"}</button>
           </div>
-          <p className="subtle small-note">The demo story opens Live view: a new device joins, then it contacts a malware server, then a Wi-Fi attack starts.</p>
+          <p className="subtle small-note">The demo story opens Live view: a new device joins, then it contacts a malware server, then a Wi-Fi attack starts. Sample household activity fills the Privacy page, bedtimes, and security checks with labeled simulated data.</p>
           {demoMsg && <Notice tone={demoMsg.startsWith("Error") || demoMsg.startsWith("Demo mode") ? "warn" : "good"} text={demoMsg} />}
           {demoStory.message && <Notice tone="warn" text={demoStory.message} />}
         </div>
@@ -774,7 +880,7 @@ export default function App() {
   return <><div className="shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark"><DeviceIcon name="radar" /></span><strong>Home Radar</strong></div>
-      <nav>{NAV.map((item) => <button className={page === item.id ? "active" : ""} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)} key={item.id}><Icon name={item.icon} /><span>{item.label}</span>{item.id === "Alerts" && alertCount > 0 && <b aria-label={`${alertCount} open`}>{alertCount}</b>}</button>)}</nav>
+      <nav>{NAV.map((item) => <button className={[page === item.id ? "active" : "", item.secondary ? "nav-secondary" : ""].filter(Boolean).join(" ") || undefined} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)} key={item.id}><Icon name={item.icon} /><span>{item.label}</span>{item.id === "Alerts" && alertCount > 0 && <b aria-label={`${alertCount} open`}>{alertCount}</b>}</button>)}</nav>
       <div className="appliance-status"><span><i className={connected ? "online" : ""} />{connected ? "Connected" : "Reconnecting…"}</span><small>{blocklistCount ? `Blocking ${blocklistCount.toLocaleString()} known bad domains` : "Loading blocklists…"}</small></div>
     </aside>
     <main><header className="topbar">
@@ -790,6 +896,7 @@ export default function App() {
         {page === "Overview" && <Overview data={data} onNavigate={navigate} onSelect={setSelected} onOpenReport={() => setShowReport(true)} freshAlertIds={freshAlertIds} />}
         {page === "Live" && <LiveView data={data} event={liveEvent} story={demoStory} demoAvailable={demoAvailable} onRunScenario={(kind) => runScenario(kind).catch(() => {})} onPlayStory={playDemoStory} onAct={actOnAlertDevice} onSelect={setSelected} />}
         {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy} />}
+        {page === "Privacy" && <Privacy onNavigate={navigate} onOpenDevice={(id) => { const match = (data.devices || []).find((device) => device.id === id); if (match) setSelected(match); }} />}
         {page === "Traffic" && <Traffic traffic={data.traffic || {}} />}
         {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} onAlertAction={actOnAlertDevice} freshAlertIds={freshAlertIds} />}
         {page === "Settings" && <Settings onRefreshDashboard={load} onPlayDemoStory={playDemoStory} demoStory={demoStory} />}

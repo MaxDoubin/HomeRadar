@@ -15,7 +15,7 @@ vi.mock("./demo", () => ({
   demoDashboardSocket: vi.fn(),
 }));
 
-import { api, dashboardSocket, getStoredToken, setStoredToken } from "./api";
+import { api, dashboardSocket, describeDetail, getStoredToken, setStoredToken } from "./api";
 
 function clearPairingUi() {
   document.querySelector(".hr-pairing-gate")?.remove();
@@ -220,5 +220,23 @@ describe("demo mode", () => {
     const socket = dashboardSocket(vi.fn());
     expect(demoDashboardSocket).toHaveBeenCalled();
     expect(socket).toBeTruthy();
+  });
+});
+
+describe("describeDetail", () => {
+  it("turns FastAPI validation errors into a sentence and a per-field map", () => {
+    const { message, fields } = describeDetail([
+      { loc: ["body", "digest_email"], msg: "Value error, Enter a valid email address." },
+      { loc: ["body", "dns_upstream"], msg: "Value error, 'x' isn't an IP address. Use something like 1.1.1.1." },
+    ]);
+    expect(message).toBe("Enter a valid email address. 'x' isn't an IP address. Use something like 1.1.1.1.");
+    expect(fields).toEqual({
+      digest_email: "Enter a valid email address.",
+      dns_upstream: "'x' isn't an IP address. Use something like 1.1.1.1.",
+    });
+  });
+
+  it("passes plain string details through", () => {
+    expect(describeDetail("Not found")).toEqual({ message: "Not found", fields: {} });
   });
 });

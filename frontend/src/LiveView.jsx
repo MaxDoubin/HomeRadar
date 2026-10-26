@@ -68,8 +68,18 @@ function layoutDevices(devices) {
   return [...top, ...bottom];
 }
 
+// Real words that are spelled with a hyphen; never split these.
+const HYPHENATED_WORDS = /\b(?:wi-fi|e-reader|e-ink|t-mobile|x-box|hi-fi)\b/gi;
+const HOSTNAME_STYLE = /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$/;
+
+// Only a raw hostname like "Moms-MacBook-Air" gets its dashes turned into
+// spaces. Friendly names and vendor strings are shown exactly as written.
 export function mapLabel(device) {
-  return deviceName(device).replace(/[-_]+/g, " ").trim();
+  const name = deviceName(device);
+  if (!device?.hostname || name !== device.hostname || !HOSTNAME_STYLE.test(name)) return name;
+  const kept = [];
+  const masked = name.replace(HYPHENATED_WORDS, (word) => { kept.push(word); return `~${kept.length - 1}~`; });
+  return masked.replace(/[-_]+/g, " ").replace(/~(\d+)~/g, (_, index) => kept[Number(index)]).trim();
 }
 
 function routerDevice(devices) {

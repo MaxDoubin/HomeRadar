@@ -114,19 +114,21 @@ export function vendorHint(vendor) {
   return match ? match[1] : "";
 }
 
-export function overviewHeadline({ alerts = [], devices = [], score = 100 } = {}) {
-  const threats = alerts.filter((alert) => alert.severity === "critical").length;
+export function overviewHeadline({ alerts = [], devices = [], score = 100, openAlerts } = {}) {
+  const threats = alerts.some((alert) => alert.severity === "critical");
   const pending = devices.filter((device) => device.is_authorized === 0).length;
-  const others = Math.max(0, alerts.length - threats);
+  // The status count covers every open alert; fall back to the list we were given.
+  const open = Number.isFinite(openAlerts) ? Math.max(openAlerts, alerts.length) : alerts.length;
   const strong = score >= 80;
   const lead = strong ? "Your home is protected." : "Home Radar is protecting your home.";
   if (threats) {
-    return { tone: "danger", text: `Home Radar caught something. ${plural(threats, "alert needs", "alerts need")} you.` };
+    return { tone: "danger", text: `Home Radar caught something. ${plural(open, "alert needs", "alerts need")} you.` };
   }
-  const review = pending || others;
-  if (review) {
-    const what = pending ? plural(pending, "device needs", "devices need") : plural(others, "alert needs", "alerts need");
-    return { tone: "warn", text: `${lead} ${what} your review.` };
+  if (open) {
+    return { tone: "warn", text: `${lead} ${plural(open, "alert needs", "alerts need")} your review.` };
+  }
+  if (pending) {
+    return { tone: "warn", text: `${lead} ${plural(pending, "device needs", "devices need")} your review.` };
   }
   if (!strong) return { tone: "warn", text: `${lead} A few changes would make it safer.` };
   return { tone: "good", text: "Your home is protected. Nothing needs you right now." };
@@ -145,7 +147,30 @@ export function friendlyError(message = "", context = "") {
   return "Something went wrong. Try again in a moment.";
 }
 
-export function reportTips({ devices = [], alerts = [] } = {}) {
+// "21:00" or "21:00:00" -> "9:00 PM". Returns "" for anything that isn't a time.
+export function formatClock(value) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || ""));
+  if (!match) return "";
+  const hours = Number(match[1]);
+  const minutes = match[2];
+  if (hours > 23 || Number(minutes) > 59) return "";
+  const suffix = hours < 12 ? "AM" : "PM";
+  const twelve = hours % 12 === 0 ? 12 : hours % 12;
+  return `${twelve}:${minutes} ${suffix}`;
+}
+
+// A catalog match is about a maker's products, never proof that this device is
+// affected, so the wording always says so.
+export function vulnerabilitySummary(entry) {
+  if (!entry) return "";
+  if (entry.status === "catalog_matches" && entry.kev_count > 0) {
+    const noun = entry.kev_count === 1 ? "known exploited vulnerability affects" : "known exploited vulnerabilities affect";
+    return `${entry.kev_count} ${noun} products from ${entry.brand || entry.vendor}.`;
+  }
+  return entry.advice || "";
+}
+
+export function reportTips({ devices = [], alerts = [], extras = {} } = {}) {
   const tips = [];
   const pending = devices.filter((device) => device.is_authorized === 0);
   if (pending.length) {
@@ -155,6 +180,10 @@ export function reportTips({ devices = [], alerts = [] } = {}) {
   if (critical.length) {
     tips.push(`Handle ${critical.length} high-priority alert${critical.length === 1 ? "" : "s"} first. Each one comes with plain-English steps.`);
   }
+  const vulnerable = (extras.vulnerabilities?.devices || []).find((entry) => entry.status === "catalog_matches" && entry.kev_count > 0);
+  if (vulnerable) {
+    tips.push(`Update ${vulnerable.name}: ${vulnerabilitySummary(vulnerable)} Installing the latest software is the fix.`);
+  }
   if (alerts.some((alert) => /deauth/i.test(alert.title || ""))) {
     tips.push("Turn on \"Protected Management Frames\" (PMF) in your router's Wi-Fi settings to stop knock-off-Wi-Fi attacks.");
   }
@@ -163,6 +192,15 @@ export function reportTips({ devices = [], alerts = [] } = {}) {
     .sort((a, b) => a.trust_score - b.trust_score)[0];
   if (weakest) {
     tips.push(`Check ${deviceName(weakest)}: its trust score is ${weakest.trust_score}/100. Update it, or block it if nobody uses it.`);
+  }
+  const tracked = (extras.privacy?.devices || [])[0];
+  if (tracked?.tracker_requests > 0) {
+    const company = tracked.companies?.[0]?.company;
+    tips.push(`${tracked.name} contacted tracking companies ${tracked.tracker_requests} times today${company ? `, mostly ${company}` : ""}. Turn off ad personalization and viewing-data sharing in its settings.`);
+  }
+  const bedtimes = extras.bedtime?.devices;
+  if (Array.isArray(bedtimes) && bedtimes.length === 0 && devices.some((device) => ["tablet", "game_console"].includes(device.device_type))) {
+    tips.push("Set a bedtime for kids' tablets and game consoles so they go offline at night automatically.");
   }
   tips.push(
     "Change your router's admin password from the factory default and keep its firmware up to date.",
