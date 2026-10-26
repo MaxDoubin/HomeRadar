@@ -33,29 +33,30 @@ def score_device(conn, device: dict) -> TrustResult:
     elif authorization == 2:
         factors["household blocked"] = -50
 
-    traffic = conn.execute(
-        """SELECT COUNT(*) AS queries,
-                  COALESCE(SUM(was_blocked), 0) AS blocked,
-                  COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
-                      AS threats,
-                  COUNT(DISTINCT domain) AS domain_variance
-           FROM traffic_logs
-           WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
-        (device["id"],),
-    ).fetchone()
-    threats = int(traffic["threats"])
-    variance = int(traffic["domain_variance"])
+    variance = int(
+        conn.execute(
+            """SELECT COUNT(DISTINCT domain) FROM traffic_logs
+               WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
+            (device["id"],),
+        ).fetchone()[0]
+    )
     # Blocked ad/analytics lookups are a privacy matter (see the privacy report),
     # not evidence of compromise; nearly every phone and TV makes them, so they
-    # must not drag a device's security trust down.
-    blocked_rows = conn.execute(
-        """SELECT domain, COUNT(*) AS hits FROM traffic_logs
-           WHERE device_id = ? AND was_blocked = 1
-             AND julianday(created_at) >= julianday('now', '-24 hours')
+    # must not count as blocked requests or as threat-intel matches here.
+    blocked = threats = 0
+    for row in conn.execute(
+        """SELECT domain,
+                  COALESCE(SUM(was_blocked), 0) AS blocked,
+                  COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
+                      AS threats
+           FROM traffic_logs
+           WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')
            GROUP BY domain""",
         (device["id"],),
-    ).fetchall()
-    blocked = sum(int(row["hits"]) for row in blocked_rows if match_tracker(row["domain"]) is None)
+    ).fetchall():
+        if match_tracker(row["domain"]) is None:
+            blocked += int(row["blocked"])
+            threats += int(row["threats"])
     if blocked:
         factors["blocked requests"] = -min(25, blocked * 3)
     if threats:
@@ -73,6 +74,8 @@ def score_device(conn, device: dict) -> TrustResult:
         factors["unresolved alerts"] = -min(20, alert_count * 4)
     if habits.unresolved_habit_alerts(conn, device["id"]):
         factors["out-of-character activity"] = -10
+    elif authorization == 1 and not (blocked or threats or alert_count or variance > 150):
+        factors["clean recent activity"] = 10
 
     findings = conn.execute(
         """SELECT severity, COUNT(*) AS count FROM exposure_findings
