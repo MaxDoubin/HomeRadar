@@ -4,7 +4,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import ssl
 import tempfile
 import threading
 import urllib.parse
@@ -13,9 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import certifi
-
 from backend import config
+from backend.tls import https_context as _https_context
 
 logger = logging.getLogger("homeradar.blocklists")
 
@@ -74,11 +72,6 @@ class UpdateResult:
     domain_count: int
     status: str
     error: str | None = None
-
-
-def _https_context() -> ssl.SSLContext:
-    """Return a TLS context backed by certifi's verified CA bundle."""
-    return ssl.create_default_context(cafile=certifi.where())
 
 
 def _validated_https_url(value: str) -> str:

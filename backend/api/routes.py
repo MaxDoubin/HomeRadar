@@ -1,6 +1,7 @@
 """REST API for inventory, security operations, traffic, settings, and digests."""
 from __future__ import annotations
 
+import ipaddress
 import random
 
 from pydantic import BaseModel, Field
@@ -11,7 +12,7 @@ from backend import config
 from backend import pairing
 from backend.alerts.email_digest import build_digest, send_digest
 from backend.db import get_conn, models
-from backend.discovery.scan_runner import run_discovery_scan
+from backend.discovery.scan_runner import create_new_device_alert, run_discovery_scan
 from backend.dns.blocklists import record_update_results
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
@@ -66,7 +67,7 @@ class PairClaimRequest(BaseModel):
 
 
 class DemoAttackRequest(BaseModel):
-    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns)$")
+    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns|new_device)$")
 
 
 class DevicePolicyUpdate(BaseModel):
@@ -484,7 +485,9 @@ def simulate_demo_attack(request: DemoAttackRequest):
         ).fetchone()
         device_id = device["id"] if device else None
 
-        if request.kind == "malicious_dns":
+        if request.kind == "new_device":
+            alert_id, device_id = _simulate_new_device(conn, device["ip"] if device else None)
+        elif request.kind == "malicious_dns":
             fake_ip = f"203.0.113.{random.randint(2, 254)}"  # RFC 5737 TEST-NET-3
             models.log_traffic(
                 conn,
@@ -520,4 +523,49 @@ def simulate_demo_attack(request: DemoAttackRequest):
                     "(Simulated for demonstration.)"
                 ),
             )
-    return {"alert_id": alert_id, "kind": request.kind}
+        alert = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        return {
+            "alert_id": alert_id,
+            "kind": request.kind,
+            "alert": dict(alert) if alert else None,
+            "device": models.get_device(conn, device_id) if device_id else None,
+        }
+
+
+def _simulate_new_device(conn, near_ip: str | None) -> tuple[int, int]:
+    """Add an unrecognized smart-plug-style device in the same /24 as the
+    household's other devices and raise the same alert a real scan would."""
+    try:
+        network = ipaddress.ip_network(f"{near_ip}/24", strict=False)
+        if not network.is_private:
+            raise ValueError(near_ip)
+    except ValueError:
+        network = ipaddress.ip_network("192.168.1.0/24")
+    taken = {row["ip"] for row in conn.execute("SELECT ip FROM devices").fetchall()}
+    free = [str(host) for host in network.hosts() if str(host) not in taken and host.packed[-1] >= 20]
+    ip = random.choice(free) if free else str(network.network_address + 200)
+    # 24:0A:C4 is an Espressif OUI, the chip inside many cheap smart plugs and bulbs.
+    mac = "24:0A:C4:" + ":".join(f"{random.randint(0, 255):02X}" for _ in range(3))
+    info = {
+        "mac": mac,
+        "ip": ip,
+        "hostname": None,
+        "vendor": "Espressif",
+        "model": None,
+        "device_type": "iot_device",
+        "confidence": 0.62,
+    }
+    device_id = models.upsert_device(
+        conn,
+        mac=mac,
+        ip=ip,
+        hostname=None,
+        vendor="Espressif",
+        device_type="iot_device",
+        confidence=0.62,
+        discovery_sources=["demo"],
+    )
+    alert_id = create_new_device_alert(
+        conn, device_id, info, note="(Simulated for demonstration.)"
+    )
+    return alert_id, device_id

@@ -30,7 +30,7 @@ class FakeResponse:
 
 
 def _fake_urlopen_factory(payload):
-    def _urlopen(request, timeout=10):
+    def _urlopen(request, timeout=10, context=None):
         return FakeResponse(payload)
 
     return _urlopen

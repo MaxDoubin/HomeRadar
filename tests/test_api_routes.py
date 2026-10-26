@@ -661,6 +661,52 @@ def test_demo_simulate_attack_invalid_kind_rejected(client, auth_headers, monkey
     assert response.status_code == 422
 
 
+def test_demo_simulate_new_device_adds_pending_device_and_alert(
+    client, auth_headers, device_id, monkeypatch, db_path
+):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post(
+        "/demo/simulate-attack", json={"kind": "new_device"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "new_device"
+    device = body["device"]
+    assert device["id"] != device_id
+    assert device["mac"].startswith("24:0A:C4:")
+    assert device["vendor"] == "Espressif"
+    assert device["is_authorized"] == 0
+    assert device["ip"].startswith("192.168.1.")
+    assert device["ip"] != "192.168.1.50"
+    assert body["alert"]["title"] == "New device connected"
+    assert body["alert"]["device_id"] == device["id"]
+    assert "Simulated" in body["alert"]["description"]
+
+    with models.get_conn(db_path) as conn:
+        alerts = models.list_alerts(conn)
+    assert [alert["title"] for alert in alerts] == ["New device connected"]
+    assert alerts[0]["severity"] == "warning"
+
+
+def test_demo_simulate_new_device_404_when_disabled(client, auth_headers, monkeypatch, db_path):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", False)
+    response = client.post(
+        "/demo/simulate-attack", json={"kind": "new_device"}, headers=auth_headers
+    )
+    assert response.status_code == 404
+    with models.get_conn(db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0] == 0
+
+
+def test_demo_simulate_new_device_with_empty_inventory(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
+    response = client.post(
+        "/demo/simulate-attack", json={"kind": "new_device"}, headers=auth_headers
+    )
+    assert response.status_code == 200
+    assert response.json()["device"]["ip"].startswith("192.168.1.")
+
+
 def test_demo_simulate_attack_works_with_no_devices(client, auth_headers, monkeypatch):
     monkeypatch.setattr(api_routes.config, "DEMO_MODE_ENABLED", True)
     response = client.post("/demo/simulate-attack", json={"kind": "deauth"}, headers=auth_headers)
