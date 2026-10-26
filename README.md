@@ -231,7 +231,7 @@ Every pull request runs backend tests on Python 3.11 and 3.12, frontend tests an
 
 The integrated software foundation is implemented, including discovery, DNS filtering, dashboard, pairing, trust scoring, alerts, backups, mobile clients, desktop packaging, Docker publishing, and release automation.
 
-Before Home Radar is described as production-ready, it still needs documented real-network validation on multiple old machines, physical ISO boot testing, DNS-failure drills, and at least one uninterrupted week-long household reliability test. Those validation tasks are tracked in [the project plan](docs/PROJECT_PLAN.md).
+Before Home Radar is described as production-ready, it still needs documented real-network validation on multiple old machines, physical ISO boot testing, DNS-failure drills, and at least one uninterrupted week-long household reliability test.
 
 ---
 
@@ -243,7 +243,6 @@ Before Home Radar is described as production-ready, it still needs documented re
 - [Device fingerprinting](docs/DEVICE_FINGERPRINTING.md)
 - [Security pipeline](docs/SECURITY_PIPELINE.md)
 - [Open-source inspiration and prior art](docs/OPEN_SOURCE_INSPIRATION.md)
-- [Project plan](docs/PROJECT_PLAN.md)
 - [Contributing](docs/CONTRIBUTING.md)
 
 ## License

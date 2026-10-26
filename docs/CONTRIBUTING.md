@@ -34,8 +34,7 @@ the backend serve the built dashboard from the same origin (its default behavior
 
 ## Ground rules
 
-- Keep the MVP feature list (see `docs/PROJECT_PLAN.md`) as the source of truth for scope
-  - stretch features live under "2.0" until the MVP milestones are done.
+- Keep the "Included features" list in the README as the source of truth for scope.
 - Home Radar must never require the family to put it inline (no bridging/routing). Any
   change to network positioning needs a clear failure-mode story if the change breaks.
 - New discovery/monitoring code should degrade gracefully without root privileges or a

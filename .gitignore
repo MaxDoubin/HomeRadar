@@ -41,3 +41,6 @@ mobile/ios/DerivedData/
 /build/
 desktop/resources/
 *.spec
+
+# Local run logs
+*.log
