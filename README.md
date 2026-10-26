@@ -13,6 +13,8 @@ Device discovery, DNS threat blocking, trust scores, real-time alerts, family co
 
 **Built for the 2026 Congressional App Challenge, Nevada District 3.**
 
+<img src="docs/images/dashboard.jpg" alt="The Home Radar dashboard showing an A security grade, 10 protected devices, and no open alerts" width="860">
+
 </div>
 
 ---
