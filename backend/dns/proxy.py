@@ -16,7 +16,7 @@ from backend import config
 from backend.db import get_conn, models
 from backend.dns.blocklists import BlocklistManager
 from backend.dns.cache import DNSCache, cache_key
-from backend.dns.policy import evaluate_policy
+from backend.dns.policy import evaluate_policy, household_now
 
 logger = logging.getLogger("homeradar.dns")
 _CGNAT = ipaddress.ip_network("100.64.0.0/10")
@@ -309,11 +309,12 @@ class DNSProxy:
                 device = models.find_device_by_ip(conn, client_ip)
                 policy = models.get_device_policy(conn, device["id"]) if device else None
                 custom_dns_records = models.get_setting(conn, "custom_dns_records")
+                timezone_name = models.get_setting(conn, "household_timezone")
         except Exception:
             logger.exception("Could not load DNS policy for %s", client_ip)
             return self._safe_error(payload, RCODE.SERVFAIL)
 
-        policy_decision = evaluate_policy(policy, decision.domain)
+        policy_decision = evaluate_policy(policy, decision.domain, household_now(timezone_name))
         household_blocked = bool(device and device["is_authorized"] == 2)
         policy_blocked = household_blocked or policy_decision.blocked
 

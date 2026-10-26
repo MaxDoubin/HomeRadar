@@ -38,6 +38,9 @@ _PROTECTED_PREFIXES = (
     "/scan",
     "/setup",
     "/pair",
+    "/bedtime",
+    "/privacy",
+    "/vulnerabilities",
 )
 
 

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import config, pairing, services
 from backend.api.routes import router as api_router
+from backend.api.insights_routes import router as insights_router
 from backend.api.websocket import router as websocket_router
 from backend.db import get_conn, init_db, models
 from backend.discovery.scan_runner import run_discovery_scan
@@ -165,6 +166,7 @@ app.add_middleware(
 app.add_middleware(ApplianceSecurityMiddleware)
 
 app.include_router(api_router)
+app.include_router(insights_router)
 app.include_router(websocket_router)
 
 kiosk_dir = config.BASE_DIR / "kiosk"

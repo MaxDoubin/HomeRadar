@@ -9,3 +9,4 @@ dnslib==0.9.26
 scikit-learn==1.7.1
 numpy==2.3.2
 certifi==2026.10.19
+tzdata==2026.5

@@ -18,6 +18,8 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     environment:
+      # Quiet hours ("bedtime") are wall-clock times; set this to your IANA timezone.
+      TZ: "${TZ:-America/Los_Angeles}"
       HOMERADAR_DNS_ENABLED: "true"
       HOMERADAR_DNS_HOST: "0.0.0.0"
       HOMERADAR_DNS_PORT: "53"
