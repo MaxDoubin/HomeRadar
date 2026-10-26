@@ -36,6 +36,11 @@ final class ConnectionStore {
         keychain.save(token)
     }
 
+    /// Drops only the token, keeping the address so re-pairing needs just a new code.
+    func clearToken() {
+        keychain.delete()
+    }
+
     func clear() {
         defaults.removeObject(forKey: Self.addressKey)
         keychain.delete()

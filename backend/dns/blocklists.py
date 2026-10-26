@@ -4,18 +4,17 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import ssl
 import tempfile
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-import certifi
-
 from backend import config
+from backend.tls import https_context as _https_context
 
 logger = logging.getLogger("homeradar.blocklists")
 
@@ -74,11 +73,48 @@ class UpdateResult:
     domain_count: int
     status: str
     error: str | None = None
+    friendly_error: str | None = None
 
 
-def _https_context() -> ssl.SSLContext:
-    """Return a TLS context backed by certifi's verified CA bundle."""
-    return ssl.create_default_context(cafile=certifi.where())
+def friendly_update_error(source: str, exc: BaseException) -> str:
+    """Describe a failed blocklist download in words a household can act on."""
+    host = urllib.parse.urlsplit(source).hostname or source
+    if isinstance(exc, urllib.error.HTTPError):
+        return f"{host} answered with an error (HTTP {exc.code}). We'll try again later."
+    if isinstance(exc, ValueError):
+        return "This blocklist address isn't a valid HTTPS link."
+    return f"Couldn't reach {host}. Check the internet connection."
+
+
+def summarize_update(results: list[UpdateResult], domain_count: int) -> dict:
+    failed = [result for result in results if result.status != "ok"]
+    if not failed:
+        message = f"Blocklists updated. Blocking {domain_count:,} known bad domains."
+    elif len(failed) == len(results):
+        message = (
+            "Couldn't update the blocklists just now, so the previous list "
+            f"({domain_count:,} domains) is still protecting you. We'll retry automatically."
+        )
+    else:
+        message = (
+            f"Updated {len(results) - len(failed)} of {len(results)} blocklists. "
+            "Domains from the sources we couldn't reach were kept from the previous list."
+        )
+    return {
+        "ok": not failed,
+        "message": message,
+        "domain_count": domain_count,
+        "sources": [
+            {
+                "url": result.source,
+                "ok": result.status == "ok",
+                "domain_count": result.domain_count,
+                "error_friendly": result.friendly_error,
+                "error_detail": result.error,
+            }
+            for result in results
+        ],
+    }
 
 
 def _validated_https_url(value: str) -> str:
@@ -156,8 +192,17 @@ class BlocklistManager:
                 results.append(UpdateResult(source, len(domains), "ok"))
             except Exception as exc:
                 logger.warning("Blocklist update failed for %s: %s", source, exc)
-                results.append(UpdateResult(source, 0, "error", str(exc)[:500]))
+                results.append(
+                    UpdateResult(
+                        source, 0, "error", str(exc)[:500], friendly_update_error(source, exc)
+                    )
+                )
         if merged:
+            if any(result.status != "ok" for result in results):
+                # A source that failed this time must not silently lose the
+                # domains it contributed before, so keep the previous list too.
+                with self._lock:
+                    merged |= self._domains
             self.replace(merged)
         return results
 

@@ -158,17 +158,22 @@ def run_discovery_scan(conn) -> list[dict]:
         info["id"] = device_id
 
         if is_new:
-            label = info["hostname"] or info["model"] or info["vendor"] or "Unknown device"
-            models.create_alert(
-                conn,
-                device_id=device_id,
-                severity="warning",
-                title="New device connected",
-                description=(
-                    f"{label} joined the network at {info['ip']} "
-                    f"({info['mac']}); classified as {info['device_type']} "
-                    f"with {round(info['confidence'] * 100)}% confidence."
-                ),
-            )
+            create_new_device_alert(conn, device_id, info)
 
     return results
+
+
+def create_new_device_alert(conn, device_id: int, info: dict, note: str = "") -> int:
+    label = info["hostname"] or info["model"] or info["vendor"] or "Unknown device"
+    description = (
+        f"{label} joined the network at {info['ip']} "
+        f"({info['mac']}); classified as {info['device_type']} "
+        f"with {round(info['confidence'] * 100)}% confidence."
+    )
+    return models.create_alert(
+        conn,
+        device_id=device_id,
+        severity="warning",
+        title="New device connected",
+        description=f"{description} {note}".strip(),
+    )

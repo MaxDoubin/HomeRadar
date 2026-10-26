@@ -43,8 +43,11 @@ Requirements: Linux, Docker Engine, and the Compose plugin.
 git clone https://github.com/MaxDoubin/HomeRadar.git
 cd HomeRadar
 cp .env.example .env
-docker compose -f docker/docker-compose.yml up -d
+docker compose --env-file .env -f docker/docker-compose.yml up -d
 ```
+
+`--env-file .env` matters: Compose otherwise looks for `.env` next to the compose
+file (in `docker/`) and silently ignores the one you just edited.
 
 Open `http://127.0.0.1:8000` in a browser running directly on the appliance, or open `http://<appliance-ip>:8000` from another device and enter the first-run code printed in the service logs.
 
@@ -61,7 +64,10 @@ The headless first-run code is regenerated on each restart until setup is comple
 The container:
 
 - uses host networking so ARP, mDNS, SSDP, and DNS can reach the LAN;
-- drops every Linux capability except `NET_RAW` and `NET_BIND_SERVICE`;
+- starts as root only long enough to switch to the unprivileged `homeradar` user, keeping
+  just `NET_BIND_SERVICE` (DNS on port 53) and `NET_RAW` (ARP discovery). The
+  `SETUID`/`SETGID`/`SETPCAP` capabilities in the compose file exist only for that
+  switch and are removed from the app process's bounding set;
 - runs with a read-only root filesystem and a temporary `/tmp`;
 - persists the database, blocklists, and backups in the `homeradar-data` volume;
 - leaves passive packet capture disabled by default.
@@ -70,6 +76,8 @@ Enabling passive traffic capture may require adding `NET_ADMIN`. Do not grant th
 
 ## Published Docker image
 
+On a Linux appliance (host networking, so discovery can see the whole LAN):
+
 ```bash
 docker run -d \
   --name homeradar \
@@ -77,14 +85,43 @@ docker run -d \
   --init \
   --network host \
   --cap-drop ALL \
-  --cap-add NET_RAW \
   --cap-add NET_BIND_SERVICE \
+  --cap-add NET_RAW \
+  --cap-add SETUID \
+  --cap-add SETGID \
+  --cap-add SETPCAP \
   --security-opt no-new-privileges:true \
   --read-only \
   --tmpfs /tmp:size=64m,mode=1777 \
   -v homeradar-data:/data \
   ghcr.io/maxdoubin/homeradar:latest
 ```
+
+Host networking only works on Linux. On Docker Desktop (Mac or Windows), or to try
+Home Radar quickly anywhere, publish the ports instead:
+
+```bash
+docker run -d \
+  --name homeradar \
+  --restart unless-stopped \
+  --init \
+  -p 8000:8000 -p 53:53/udp -p 53:53/tcp \
+  --cap-drop ALL \
+  --cap-add NET_BIND_SERVICE \
+  --cap-add NET_RAW \
+  --cap-add SETUID \
+  --cap-add SETGID \
+  --cap-add SETPCAP \
+  --security-opt no-new-privileges:true \
+  --read-only \
+  --tmpfs /tmp:size=64m,mode=1777 \
+  -v homeradar-data:/data \
+  ghcr.io/maxdoubin/homeradar:latest
+```
+
+In this bridge mode the dashboard and DNS filtering work normally, but ARP, mDNS, and
+SSDP discovery only see the container's own Docker network, not your home LAN. Use
+host networking on Linux for a full appliance.
 
 ## Native Debian service
 

@@ -83,6 +83,14 @@ jobs:
             chmod +x desktop/resources/homeradar-backend
           fi
 
+      - name: Smoke-test packaged backend
+        run: |
+          if [[ -f desktop/resources/homeradar-backend.exe ]]; then
+            python scripts/smoke_packaged_backend.py desktop/resources/homeradar-backend.exe --timeout 120
+          else
+            python scripts/smoke_packaged_backend.py desktop/resources/homeradar-backend --timeout 120
+          fi
+
       - name: Build desktop installer
         working-directory: desktop
         env:
@@ -156,6 +164,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The v3 default also installs the long-removed "tools" package, which
+          # current cmdline-tools no longer serve, failing the step.
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -259,6 +271,8 @@ jobs:
         run: |
           cat > release-notes.md <<'EOF'
           # Home Radar downloads
+
+          Home Radar turns an old computer into a free home-network security guard: device discovery, DNS threat blocking, and plain-English alerts. Open source (MIT).
 
           Choose the file for your device:
 

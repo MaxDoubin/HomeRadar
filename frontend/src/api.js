@@ -153,6 +153,23 @@ export async function tokenReady() {
   return ensureToken();
 }
 
+// FastAPI validation errors (422) arrive as a list of {loc, msg}. Turn them
+// into one readable sentence plus a per-field map for inline messages.
+export function describeDetail(detail) {
+  if (!Array.isArray(detail)) {
+    return { message: typeof detail === "string" ? detail : "", fields: {} };
+  }
+  const fields = {};
+  const messages = detail.map((item) => {
+    const text = String(item?.msg || "").replace(/^Value error, /, "");
+    const loc = Array.isArray(item?.loc) ? item.loc : [];
+    const field = loc[loc.length - 1];
+    if (typeof field === "string" && field !== "body") fields[field] = text;
+    return text;
+  }).filter(Boolean);
+  return { message: [...new Set(messages)].join(" "), fields };
+}
+
 export async function api(path, options = {}) {
   if (import.meta.env.VITE_DEMO_MODE === "true") {
     return handleDemoApi(path, options);
@@ -174,8 +191,10 @@ export async function api(path, options = {}) {
   }
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    const error = new Error(payload.detail || `Request failed (${response.status})`);
+    const { message, fields } = describeDetail(payload.detail);
+    const error = new Error(message || `Request failed (${response.status})`);
     error.status = response.status;
+    error.fields = fields;
     throw error;
   }
   if (response.status === 204) return null;

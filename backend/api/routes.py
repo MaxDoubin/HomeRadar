@@ -1,21 +1,26 @@
 """REST API for inventory, security operations, traffic, settings, and digests."""
 from __future__ import annotations
 
+import ipaddress
+import json
+import logging
 import random
 
-from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse
 
 from backend import config
 from backend import pairing
 from backend.alerts.email_digest import build_digest, send_digest
 from backend.db import get_conn, models
-from backend.discovery.scan_runner import run_discovery_scan
-from backend.dns.blocklists import record_update_results
+from backend.discovery.scan_runner import create_new_device_alert, run_discovery_scan
+from backend.dns.blocklists import record_update_results, summarize_update
+from backend.dns.policy import is_valid_clock
 from backend.monitor.traffic_analyzer import record_connection
 from backend.monitor.cisa_kev import search_catalog, update_catalog
 from backend.monitor.exposure_audit import audit_all, audit_device
+from backend.monitor import habits
 from backend.monitor.trust_scoring import household_score, recalculate_all, score_device
 from backend.maintenance import (
     backup_path,
@@ -28,7 +33,32 @@ from backend.pairing import require_token
 from backend.services import blocklists
 from backend import services
 
+logger = logging.getLogger("homeradar.api")
+
 router = APIRouter()
+
+
+def _default_upstreams() -> str:
+    return ",".join(config.DNS_UPSTREAMS)
+
+
+def _normalize_upstreams(value: str) -> str:
+    parts = [part.strip() for part in value.split(",") if part.strip()]
+    if not parts:
+        raise ValueError("Enter at least one DNS server IP address.")
+    for part in parts:
+        try:
+            ipaddress.ip_address(part)
+        except ValueError:
+            raise ValueError(f"{part!r} isn't an IP address. Use something like 1.1.1.1.") from None
+    return ",".join(parts)
+
+
+def _normalize_email(value: str) -> str:
+    value = value.strip()
+    if value and (" " in value or "@" not in value or "." not in value.rsplit("@", 1)[-1]):
+        raise ValueError("Enter a valid email address.")
+    return value
 
 
 class AuthorizationUpdate(BaseModel):
@@ -46,6 +76,38 @@ class SettingsUpdate(BaseModel):
     notifications_enabled: bool | None = None
     custom_dns_records: str | None = Field(default=None)
 
+    @field_validator("household_name")
+    @classmethod
+    def _name_not_blank(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError("Household name can't be empty.")
+        return value.strip()
+
+    @field_validator("digest_email")
+    @classmethod
+    def _email_shape(cls, value: str | None) -> str | None:
+        return None if value is None else _normalize_email(value)
+
+    @field_validator("dns_upstream")
+    @classmethod
+    def _upstreams_are_ips(cls, value: str | None) -> str | None:
+        return None if value is None else _normalize_upstreams(value)
+
+    @field_validator("custom_dns_records")
+    @classmethod
+    def _records_json(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            raise ValueError("Custom DNS records must be valid JSON.") from None
+        if not isinstance(parsed, dict):
+            raise ValueError('Custom DNS records must be a JSON object like {"nas.home": "192.168.1.10"}.')
+        return value
+
 
 class ConnectionObservation(BaseModel):
     source_ip: str
@@ -53,12 +115,37 @@ class ConnectionObservation(BaseModel):
     bytes_sent: int = Field(default=0, ge=0)
     bytes_received: int = Field(default=0, ge=0)
 
+    @field_validator("source_ip", "destination_ip")
+    @classmethod
+    def _is_ip(cls, value: str) -> str:
+        try:
+            return str(ipaddress.ip_address(value.strip()))
+        except ValueError:
+            raise ValueError("Must be an IP address.") from None
+
 
 class SetupRequest(BaseModel):
     household_name: str = Field(min_length=1, max_length=120)
     digest_email: str = Field(default="", max_length=320)
-    dns_upstream: str = Field(default="1.1.1.1", max_length=255)
+    dns_upstream: str = Field(default_factory=_default_upstreams, max_length=255)
     notifications_enabled: bool = True
+
+    @field_validator("household_name")
+    @classmethod
+    def _name_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Household name can't be empty.")
+        return value.strip()
+
+    @field_validator("digest_email")
+    @classmethod
+    def _email_shape(cls, value: str) -> str:
+        return _normalize_email(value)
+
+    @field_validator("dns_upstream")
+    @classmethod
+    def _upstreams_are_ips(cls, value: str) -> str:
+        return _normalize_upstreams(value)
 
 
 class PairClaimRequest(BaseModel):
@@ -66,7 +153,7 @@ class PairClaimRequest(BaseModel):
 
 
 class DemoAttackRequest(BaseModel):
-    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns)$")
+    kind: str = Field(default="deauth", pattern="^(deauth|malicious_dns|new_device|night_upload)$")
 
 
 class DevicePolicyUpdate(BaseModel):
@@ -75,6 +162,13 @@ class DevicePolicyUpdate(BaseModel):
     block_end: str | None = Field(default=None, pattern=r"^\d{2}:\d{2}(:\d{2})?$")
     blocked_domains: list[str] = Field(default_factory=list, max_length=500)
     allowed_domains: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("block_start", "block_end")
+    @classmethod
+    def _valid_clock(cls, value: str | None) -> str | None:
+        if value is not None and not is_valid_clock(value):
+            raise ValueError("Use a 24-hour time like 21:00.")
+        return value
 
 
 @router.get("/status")
@@ -95,7 +189,18 @@ def get_status():
 @router.get("/health")
 def get_health():
     with get_conn() as conn:
-        return health_report(conn)
+        report = health_report(conn)
+    proxy = services.dns_proxy
+    failure = getattr(proxy, "failure", None) if proxy is not None else None
+    if config.DNS_ENABLED and failure:
+        # Stay HTTP 200 so container healthchecks don't restart-loop on a port
+        # conflict that a restart can't fix; the status field carries the problem.
+        report["status"] = "degraded"
+        report["warnings"].append(failure)
+        report["dns"]["listening"] = False
+    elif config.DNS_ENABLED and proxy is not None:
+        report["dns"]["listening"] = True
+    return report
 
 
 @router.get("/dashboard")
@@ -146,7 +251,7 @@ def update_device_authorization(device_id: int, update: AuthorizationUpdate):
 
 
 @router.get("/devices/{device_id}/traffic")
-def get_device_traffic(device_id: int, limit: int = 200):
+def get_device_traffic(device_id: int, limit: int = Query(200, ge=1, le=1000)):
     with get_conn() as conn:
         if models.get_device(conn, device_id) is None:
             raise HTTPException(status_code=404, detail="Device not found")
@@ -154,12 +259,27 @@ def get_device_traffic(device_id: int, limit: int = 200):
 
 
 @router.get("/devices/{device_id}/traffic/timeseries")
-def get_device_traffic_timeseries(device_id: int, hours: int = 24):
+def get_device_traffic_timeseries(device_id: int, hours: int = Query(24, ge=1, le=24 * 30)):
     """Hourly bandwidth buckets for the Devices page sparkline."""
     with get_conn() as conn:
         if models.get_device(conn, device_id) is None:
             raise HTTPException(status_code=404, detail="Device not found")
         return {"hours": hours, "buckets": models.device_bandwidth_timeseries(conn, device_id, hours=hours)}
+
+
+@router.get("/devices/{device_id}/habits")
+def get_device_habits(device_id: int):
+    """What the habit model has learned about one device's normal rhythm."""
+    with get_conn() as conn:
+        if models.get_device(conn, device_id) is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return habits.profile(conn, device_id)
+
+
+@router.get("/habits/summary")
+def get_habits_summary():
+    with get_conn() as conn:
+        return habits.summary(conn)
 
 
 @router.get("/devices/{device_id}/trust")
@@ -226,13 +346,13 @@ def update_alert(alert_id: int, update: AlertUpdate):
 
 
 @router.get("/traffic")
-def get_traffic(device_id: int | None = None, limit: int = 200):
+def get_traffic(device_id: int | None = None, limit: int = Query(200, ge=1, le=1000)):
     with get_conn() as conn:
         return models.list_traffic(conn, device_id=device_id, limit=limit)
 
 
 @router.get("/traffic/summary")
-def get_traffic_summary(hours: int = 24):
+def get_traffic_summary(hours: int = Query(24, ge=1, le=24 * 30)):
     with get_conn() as conn:
         return models.traffic_summary(conn, hours=hours)
 
@@ -303,14 +423,17 @@ def update_blocklists():
     results = blocklists.update()
     with get_conn() as conn:
         record_update_results(conn, results)
-    return {
-        "domain_count": blocklists.count,
-        "sources": [result.__dict__ for result in results],
-    }
+    summary = summarize_update(results, blocklists.count)
+    for source in summary["sources"]:
+        # Older dashboard builds read source/status/error.
+        source["source"] = source["url"]
+        source["status"] = "ok" if source["ok"] else "error"
+        source["error"] = source["error_friendly"]
+    return summary
 
 
 @router.get("/threat-intel/cisa-kev")
-def get_cisa_kev(query: str = "", limit: int = 100):
+def get_cisa_kev(query: str = Query("", max_length=200), limit: int = Query(100, ge=1, le=500)):
     with get_conn() as conn:
         return search_catalog(conn, query=query, limit=limit)
 
@@ -322,7 +445,17 @@ def refresh_cisa_kev():
             count = update_catalog(conn)
         return {"records": count, "source": config.CISA_KEV_URL}
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"CISA KEV update failed: {exc}") from exc
+        logger.warning("CISA KEV update failed: %s", exc)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": (
+                    "Couldn't reach cisa.gov to update the vulnerability catalog. "
+                    "Check the internet connection and try again."
+                ),
+                "error_detail": type(exc).__name__,
+            },
+        )
 
 
 @router.get("/settings")
@@ -332,7 +465,7 @@ def get_settings():
     return {
         "household_name": saved.get("household_name", config.HOUSEHOLD_NAME),
         "digest_email": saved.get("digest_email", config.SMTP_TO),
-        "dns_upstream": saved.get("dns_upstream", config.DNS_UPSTREAM),
+        "dns_upstream": saved.get("dns_upstream", _default_upstreams()),
         "notifications_enabled": saved.get("notifications_enabled", "true") == "true",
         "dns_enabled": config.DNS_ENABLED,
         "setup_complete": saved.get("setup_complete", "false") == "true",
@@ -364,7 +497,19 @@ def get_setup_status():
     }
 
 
-@router.post("/setup")
+def _require_token_after_setup(
+    x_homeradar_token: str | None = Header(default=None, alias="X-HomeRadar-Token"),
+    authorization: str | None = Header(default=None),
+    homeradar_token: str | None = Cookie(default=None),
+) -> None:
+    """First-run setup is open; re-running it later must not overwrite settings anonymously."""
+    with get_conn() as conn:
+        complete = models.get_setting(conn, "setup_complete", "false") == "true"
+    if complete:
+        require_token(x_homeradar_token, authorization, homeradar_token)
+
+
+@router.post("/setup", dependencies=[Depends(_require_token_after_setup)])
 def complete_setup(setup: SetupRequest):
     with get_conn() as conn:
         models.set_settings(
@@ -483,8 +628,24 @@ def simulate_demo_attack(request: DemoAttackRequest):
             "SELECT id, ip, mac FROM devices ORDER BY last_seen DESC LIMIT 1"
         ).fetchone()
         device_id = device["id"] if device else None
+        habits_payload = None
+        alert_id: int | None
 
-        if request.kind == "malicious_dns":
+        if request.kind == "new_device":
+            alert_id, device_id = _simulate_new_device(conn, device["ip"] if device else None)
+        elif request.kind == "night_upload":
+            existing = conn.execute(
+                "SELECT ip FROM devices WHERE mac = ?", (habits.DEMO_CAMERA_MAC,)
+            ).fetchone()
+            ip = existing["ip"] if existing else _demo_free_ip(conn, device["ip"] if device else None)
+            camera, result, alert_id = habits.simulate_night_upload(conn, ip)
+            device_id = camera["id"]
+            habits_payload = {
+                "score": result.score if result else None,
+                "explanation": habits.describe(camera, result) if result and result.is_anomaly else None,
+                "typical_active_hours": habits.profile(conn, device_id)["typical_active_hours"],
+            }
+        elif request.kind == "malicious_dns":
             fake_ip = f"203.0.113.{random.randint(2, 254)}"  # RFC 5737 TEST-NET-3
             models.log_traffic(
                 conn,
@@ -520,4 +681,55 @@ def simulate_demo_attack(request: DemoAttackRequest):
                     "(Simulated for demonstration.)"
                 ),
             )
-    return {"alert_id": alert_id, "kind": request.kind}
+        alert = conn.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+        return {
+            "alert_id": alert_id,
+            "kind": request.kind,
+            "alert": dict(alert) if alert else None,
+            "device": models.get_device(conn, device_id) if device_id else None,
+            "habits": habits_payload,
+        }
+
+
+def _demo_free_ip(conn, near_ip: str | None) -> str:
+    """An unused address in the same private /24 as the household's devices."""
+    try:
+        network = ipaddress.ip_network(f"{near_ip}/24", strict=False)
+        if not network.is_private:
+            raise ValueError(near_ip)
+    except ValueError:
+        network = ipaddress.ip_network("192.168.1.0/24")
+    taken = {row["ip"] for row in conn.execute("SELECT ip FROM devices").fetchall()}
+    free = [str(host) for host in network.hosts() if str(host) not in taken and host.packed[-1] >= 20]
+    return random.choice(free) if free else str(network.network_address + 200)
+
+
+def _simulate_new_device(conn, near_ip: str | None) -> tuple[int, int]:
+    """Add an unrecognized smart-plug-style device in the same /24 as the
+    household's other devices and raise the same alert a real scan would."""
+    ip = _demo_free_ip(conn, near_ip)
+    # 24:0A:C4 is an Espressif OUI, the chip inside many cheap smart plugs and bulbs.
+    mac = "24:0A:C4:" + ":".join(f"{random.randint(0, 255):02X}" for _ in range(3))
+    info = {
+        "mac": mac,
+        "ip": ip,
+        "hostname": None,
+        "vendor": "Espressif",
+        "model": None,
+        "device_type": "iot_device",
+        "confidence": 0.62,
+    }
+    device_id = models.upsert_device(
+        conn,
+        mac=mac,
+        ip=ip,
+        hostname=None,
+        vendor="Espressif",
+        device_type="iot_device",
+        confidence=0.62,
+        discovery_sources=["demo"],
+    )
+    alert_id = create_new_device_alert(
+        conn, device_id, info, note="(Simulated for demonstration.)"
+    )
+    return alert_id, device_id

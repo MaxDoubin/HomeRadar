@@ -1,14 +1,27 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api, dashboardSocket, setStoredToken } from "./api";
+import { DeviceIcon, Icon } from "./icons";
+import LiveView, { HabitProfile, SCENARIOS, timeAgo } from "./LiveView";
+import {
+  BedtimeCard, DeviceBedtime, DevicePrivacy, DeviceVulnerabilities, Privacy, SecurityChecksCard,
+} from "./Household";
+import {
+  deviceName, deviceTypeLabel, explainAlert, formatClock, friendlyError, gradeVerdict, letterGrade,
+  overviewHeadline, plural, reportTips,
+} from "./insights";
 
-const NAV = ["Overview", "Devices", "Traffic", "Alerts", "Settings"];
-const deviceGlyphs = {
-  phone: "▯", tablet: "▭", computer: "⌨", server: "▤", router: "⌁",
-  access_point: "⌁", network_switch: "⇄", printer: "▱", iot_camera: "◉",
-  doorbell: "◉", smart_tv: "▰", streaming_device: "▶", game_console: "◇",
-  smart_speaker: "◌", smart_home_hub: "⬡", smart_plug: "ϟ", thermostat: "◒",
-  wearable: "◍", nas: "▥", media_server: "▶", iot_device: "⬢", unknown: "?",
-};
+const NAV = [
+  { id: "Overview", label: "Home", icon: "home" },
+  { id: "Live", label: "Live view", icon: "live" },
+  { id: "Devices", label: "Devices", icon: "devices" },
+  { id: "Alerts", label: "Alerts", icon: "alerts" },
+  { id: "Privacy", label: "Privacy", icon: "privacy" },
+  // Reachable from the Privacy page on phones, where the bottom bar has no room.
+  { id: "Traffic", label: "Traffic", icon: "traffic", secondary: true },
+  { id: "Settings", label: "Settings", icon: "settings" },
+];
+const DEMO_STORY = SCENARIOS.map((scenario) => scenario.kind);
+const STORY_DELAYS = [800, 9000, 7000];
 
 function tone(score) {
   if (score >= 85) return "good";
@@ -16,60 +29,45 @@ function tone(score) {
   return "danger";
 }
 
-function timeAgo(value) {
-  if (!value) return "never";
-  const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+function severityInfo(severity) {
+  if (severity === "critical" || severity === "danger") return { tone: "danger", label: "Threat" };
+  if (severity === "warning" || severity === "warn") return { tone: "warn", label: "Needs review" };
+  return { tone: "info", label: "For your information" };
 }
 
-function Icon({ name }) {
-  const paths = {
-    overview: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
-    devices: <><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></>,
-    traffic: <><path d="M4 18V9M10 18V5M16 18v-7M22 18V3"/></>,
-    alerts: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></>,
-    settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a2 2 0 0 0 .4 2.2l.1.1-2.6 2.6-.1-.1a2 2 0 0 0-2.2-.4 2 2 0 0 0-1.2 1.8V21h-3.6v-.2A2 2 0 0 0 9 19a2 2 0 0 0-2.2.4l-.1.1-2.6-2.6.1-.1A2 2 0 0 0 4.6 15 2 2 0 0 0 2.8 14H2v-4h.8A2 2 0 0 0 4.6 9a2 2 0 0 0-.4-2.2l-.1-.1 2.6-2.6.1.1A2 2 0 0 0 9 4.6 2 2 0 0 0 10.2 3V2h3.6v1A2 2 0 0 0 15 4.6a2 2 0 0 0 2.2-.4l.1-.1 2.6 2.6-.1.1A2 2 0 0 0 19.4 9a2 2 0 0 0 1.8 1H22v4h-.8a2 2 0 0 0-1.8 1Z"/></>,
-  };
-  return <svg className="icon" viewBox="0 0 24 24">{paths[name]}</svg>;
+function stateLabel(device) {
+  if (device.is_authorized === 1) return { key: "trusted", label: "Trusted" };
+  if (device.is_authorized === 2) return { key: "blocked", label: "Blocked" };
+  return { key: "pending", label: "Needs review" };
 }
 
-function ScoreRing({ score = 100 }) {
-  const radius = 46;
+function GradeMark({ score }) {
+  const radius = 44;
   const circumference = 2 * Math.PI * radius;
-  return (
-    <div className={`score-ring ${tone(score)}`}>
-      <svg viewBox="0 0 112 112">
-        <circle className="score-track" cx="56" cy="56" r={radius} />
-        <circle className="score-value" cx="56" cy="56" r={radius}
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - score / 100)} />
-      </svg>
-      <div><strong>{score}</strong><span>SECURITY</span></div>
-    </div>
-  );
-}
-
-function Stat({ label, value, detail, accent = "green" }) {
-  return <article className="stat card">
-    <div className={`stat-mark ${accent}`} />
-    <div><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
-  </article>;
+  const grade = letterGrade(score);
+  return <div className={`grade-mark ${tone(score)}`}>
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <circle className="track" cx="50" cy="50" r={radius} />
+      <circle className="value" cx="50" cy="50" r={radius} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - score / 100)} />
+    </svg>
+    <strong data-testid="household-grade">{grade}</strong>
+  </div>;
 }
 
 function ActivityChart({ timeline = [] }) {
-  const data = timeline.length ? timeline : Array.from({ length: 12 }, (_, i) => ({ queries: [5,8,6,12,9,15,11,18,13,21,16,12][i], blocked: 0 }));
-  const max = Math.max(1, ...data.map((point) => point.queries));
-  const points = data.map((point, index) => `${index * (100 / Math.max(1, data.length - 1))},${48 - (point.queries / max) * 42}`).join(" ");
-  return <div className="activity-chart">
-    <svg preserveAspectRatio="none" viewBox="0 0 100 50">
-      <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#39e6a2" stopOpacity=".34"/><stop offset="1" stopColor="#39e6a2" stopOpacity="0"/></linearGradient></defs>
-      <polygon points={`0,50 ${points} 100,50`} fill="url(#area)" />
-      <polyline points={points} fill="none" stroke="#39e6a2" strokeWidth="1.3" vectorEffect="non-scaling-stroke" />
-    </svg>
-  </div>;
+  if (!timeline.length) return <p className="chart-empty">No DNS activity yet. Home Radar starts counting once it's your network's DNS server.</p>;
+  const max = Math.max(1, ...timeline.map((point) => point.queries || 0));
+  const width = 100 / timeline.length;
+  return <svg className="activity-chart" viewBox="0 0 100 40" preserveAspectRatio="none" role="img" aria-label="Requests per hour, with blocked requests highlighted">
+    {timeline.map((point, index) => {
+      const total = ((point.queries || 0) / max) * 38;
+      const blocked = ((point.blocked || 0) / max) * 38;
+      return <g key={index}>
+        <rect className="bar" x={index * width + width * 0.18} width={width * 0.64} y={40 - total} height={total} />
+        {blocked > 0 && <rect className="bar blocked" x={index * width + width * 0.18} width={width * 0.64} y={40 - blocked} height={blocked} />}
+      </g>;
+    })}
+  </svg>;
 }
 
 function BandwidthSparkline({ buckets }) {
@@ -81,13 +79,13 @@ function BandwidthSparkline({ buckets }) {
   if (totals.length === 1) totals = [0, ...totals];
   const max = Math.max(1, ...totals);
   const points = totals.map((value, index) => `${index * (100 / Math.max(1, totals.length - 1))},${20 - (value / max) * 18}`).join(" ");
-  return <svg className="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none">
-    <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+  return <svg className="sparkline" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
   </svg>;
 }
 
 function DeviceRow({ device, onSelect, showBandwidth }) {
-  const state = device.is_authorized === 1 ? "trusted" : device.is_authorized === 2 ? "blocked" : "pending";
+  const state = stateLabel(device);
   const [bandwidth, setBandwidth] = useState(null);
   useEffect(() => {
     if (!showBandwidth) return;
@@ -97,90 +95,145 @@ function DeviceRow({ device, onSelect, showBandwidth }) {
       .catch(() => { if (!cancelled) setBandwidth([]); });
     return () => { cancelled = true; };
   }, [device.id, showBandwidth]);
-  return <button className={`device-row${showBandwidth ? " device-row--wide" : ""}`} onClick={() => onSelect(device)}>
-    <span className={`device-glyph ${tone(device.trust_score)}`}>{deviceGlyphs[device.device_type] || "?"}</span>
-    <span className="device-main"><strong>{device.hostname || device.model || device.vendor || "Unknown device"}</strong><small>{device.vendor || "Unknown manufacturer"} · {device.ip}</small></span>
-    <span className={`pill ${state}`}>{state}</span>
+  return <button className={`device-row${showBandwidth ? " wide" : ""}`} onClick={() => onSelect(device)}>
+    <span className={`device-avatar ${state.key}`}><DeviceIcon type={device.device_type} /></span>
+    <span className="device-main"><strong>{deviceName(device)}</strong><small>{deviceTypeLabel(device.device_type)} · {device.vendor || "Unknown maker"} · <span className="mono">{device.ip}</span></small></span>
+    <span className={`status ${state.key}`}>{state.label}</span>
     <span className={`trust ${tone(device.trust_score)}`}>{device.trust_score}</span>
     <span className="last-seen">{timeAgo(device.last_seen)}</span>
-    {showBandwidth && <span className={`bandwidth-cell ${tone(device.trust_score)}`}><BandwidthSparkline buckets={bandwidth} /></span>}
+    {showBandwidth && <span className="bandwidth-cell"><BandwidthSparkline buckets={bandwidth} /></span>}
   </button>;
 }
 
-function NetworkMap({ devices, onSelect }) {
-  const visible = devices.slice(0, 12);
-  return <article className="card network-card">
-    <header><div><span>LIVE TOPOLOGY</span><h3>Household network map</h3></div><small>{devices.length} devices</small></header>
-    <div className="network-map">
-      <div className="radar-sweep" aria-hidden="true" />
-      <div className="hub"><span>⌁</span><b>ROUTER</b></div>
-      {visible.map((device, index) => {
-        const angle = (Math.PI * 2 * index) / Math.max(visible.length, 1) - Math.PI / 2;
-        const x = 50 + Math.cos(angle) * 41;
-        const y = 50 + Math.sin(angle) * 38;
-        const label = device.hostname || device.vendor || device.ip;
-        return <button key={device.id} style={{left:`${x}%`,top:`${y}%`}} onClick={() => onSelect(device)} title={label}><span>{deviceGlyphs[device.device_type] || "?"}</span><small>{label.slice(0,16)}</small></button>;
-      })}
-    </div>
-  </article>;
+function SimulatedTag({ alert }) {
+  return explainAlert(alert).simulated ? <em className="sim-tag" title="Created by demo mode, not a real detection">Simulated</em> : null;
 }
 
-function Overview({ data, onNavigate, onSelect, freshAlertIds = new Set() }) {
-  const { status = {}, devices = [], alerts = [], traffic = {} } = data;
-  const pending = devices.filter((device) => device.is_authorized === 0).length;
-  return <>
-    <section className="hero-row">
-      <div>
-        <p className="eyebrow">HOUSEHOLD PROTECTION</p>
-        <h1>Your network at a glance</h1>
-        <p className="subtle">Live visibility across every device in your home.</p>
+function AlertGuide({ alert, onAct }) {
+  const guide = explainAlert(alert);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const act = async (state) => {
+    setBusy(state === 2 ? "block" : "trust");
+    setError("");
+    try {
+      await onAct(alert, state);
+    } catch (err) {
+      setError(err.message || "That didn't work. Try again.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const showActions = onAct && (guide.canBlock || guide.canTrust);
+  return <div className="alert-guide">
+    <p><b>What this means</b>{guide.meaning}</p>
+    <p><b>What to do</b>{guide.action}</p>
+    {showActions && <div className="alert-actions">
+      {guide.canBlock && <button className="danger-button" onClick={() => act(2)} disabled={!!busy}>{busy === "block" ? "Blocking…" : "Block this device"}</button>}
+      {guide.canTrust && <button onClick={() => act(1)} disabled={!!busy}>{busy === "trust" ? "Saving…" : "It's mine, trust it"}</button>}
+    </div>}
+    {error && <p className="inline-error">{error}</p>}
+  </div>;
+}
+
+function useHouseholdChecks(deviceCount) {
+  const [bedtime, setBedtime] = useState(null);
+  const [vulnerabilities, setVulnerabilities] = useState(null);
+  const loadVulnerabilities = () => api("/vulnerabilities").then(setVulnerabilities).catch(() => setVulnerabilities(null));
+  useEffect(() => {
+    api("/bedtime").then(setBedtime).catch(() => setBedtime(null));
+    loadVulnerabilities();
+  }, [deviceCount]);
+  return { bedtime, vulnerabilities, loadVulnerabilities };
+}
+
+function Overview({ data, onNavigate, onSelect, onOpenReport, freshAlertIds = new Set() }) {
+  const { status = {}, devices = [], traffic = {} } = data;
+  const checks = useHouseholdChecks(devices.length);
+  const openDevice = (id) => { const match = devices.find((device) => device.id === id); if (match) onSelect(match); };
+  const alerts = data.alerts || [];
+  const score = status.security_score ?? 100;
+  const grade = letterGrade(score);
+  const deviceCount = status.device_count ?? devices.length;
+  const blocked = traffic.blocked || 0;
+  const openAlerts = status.open_alert_count ?? alerts.length;
+  const headline = overviewHeadline({ alerts, devices, score, openAlerts: status.open_alert_count });
+  return <div className="overview" data-testid="overview">
+    <section className="overview-hero">
+      <h1 className={`headline ${headline.tone}`}>{headline.text}</h1>
+      <p className="lead">Home Radar is watching {plural(deviceCount, "device")} and checking every website they try to reach.</p>
+      <div className="hero-actions">
+        {alerts.length > 0
+          ? <button className="primary" onClick={() => onNavigate("Alerts")}>Review {plural(alerts.length, "alert")}</button>
+          : <button className="primary" onClick={() => onNavigate("Devices")}>See your devices</button>}
+        <button onClick={() => onNavigate("Live")}><Icon name="live" />Open live view</button>
       </div>
-      <div className="live"><i /> Live monitoring</div>
     </section>
-    <section className="overview-grid">
-      <article className="score-card card">
-        <ScoreRing score={status.security_score ?? 100} />
-        <div><span>Household security</span><h2>{(status.security_score ?? 100) >= 85 ? "Looking strong" : (status.security_score ?? 100) >= 65 ? "Needs attention" : "Action recommended"}</h2><p>{status.open_alert_count || 0} open alerts across {status.device_count || 0} devices.</p></div>
-      </article>
-      <div className="stats-grid">
-        <Stat label="DEVICES" value={status.device_count || 0} detail={`${pending} awaiting review`} />
-        <Stat label="BLOCKED · 24H" value={traffic.blocked || 0} detail={`${traffic.queries || 0} DNS queries`} accent="amber" />
-        <Stat label="ACTIVE ALERTS" value={status.open_alert_count || 0} detail="Review recommended" accent="red" />
-      </div>
-    </section>
-    <section className="two-column">
-      <article className="card panel">
-        <header><div><span>NETWORK ACTIVITY</span><h3>DNS requests · last 24 hours</h3></div><strong>{traffic.queries || 0}</strong></header>
-        <ActivityChart timeline={traffic.timeline} />
-        <footer><span><i className="dot green"/>Allowed</span><span><i className="dot amber"/>Blocked</span></footer>
-      </article>
-      <article className="card panel alert-panel">
-        <header><div><span>RECENT ALERTS</span><h3>What needs your attention</h3></div><button onClick={() => onNavigate("Alerts")}>View all</button></header>
-        <div className="alert-list">
-          {alerts.slice(0, 4).map((alert) => <div className={`alert-item${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><strong>{alert.title}</strong><p>{alert.description}</p></div><small>{timeAgo(alert.created_at)}</small></div>)}
-          {!alerts.length && <div className="empty">No active alerts. Your network is quiet.</div>}
+
+    <section className="summary" aria-label="Protection summary">
+      <div className="grade-cell">
+        <GradeMark score={score} />
+        <div>
+          <span className="label">Security grade</span>
+          <b>{gradeVerdict(grade)}</b>
+          <small>Score {score} of 100 · {plural(openAlerts, "open alert")}</small>
         </div>
+      </div>
+      <div className="fact"><b>{deviceCount}</b><span>{deviceCount === 1 ? "device" : "devices"} protected</span></div>
+      <div className="fact"><b>{blocked}</b><span>{blocked === 1 ? "threat" : "threats"} blocked today</span></div>
+      <div className="fact"><b>$0</b><span>a month, no subscription</span></div>
+      {onOpenReport && <button className="text-button report-inline" onClick={onOpenReport}><Icon name="report" />View report card</button>}
+    </section>
+
+    <section className="overview-columns">
+      <article className="panel attention">
+        <header><h2>Needs your attention</h2>{alerts.length > 0 && <button className="text-button" onClick={() => onNavigate("Alerts")}>See all</button>}</header>
+        {alerts.slice(0, 3).map((alert) => {
+          const severity = severityInfo(alert.severity);
+          return <button key={alert.id} className={`attention-row${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} onClick={() => onNavigate("Alerts")}>
+            <i className={`sev ${severity.tone}`} aria-hidden="true" />
+            <span><strong>{alert.title}</strong><SimulatedTag alert={alert} /><small>{explainAlert(alert).meaning}</small></span>
+            <time>{timeAgo(alert.created_at)}</time>
+          </button>;
+        })}
+        {!alerts.length && <p className="empty">Nothing needs you. Your network is quiet.</p>}
+        {alerts.length > 3 && <p className="more-note">{plural(alerts.length - 3, "more alert")} on the Alerts page.</p>}
+      </article>
+      <article className="panel activity">
+        <header><h2>Internet activity today</h2></header>
+        <p className="figure"><b>{traffic.queries || 0}</b> lookups · <b className="warn-text">{blocked}</b> blocked</p>
+        <ActivityChart timeline={traffic.timeline} />
+        <p className="legend"><span><i className="key" />Requests</span><span><i className="key blocked" />Blocked</span></p>
       </article>
     </section>
-    <article className="card panel devices-panel">
-      <header><div><span>RECENT DEVICES</span><h3>Connected to your network</h3></div><button onClick={() => onNavigate("Devices")}>All devices</button></header>
-      <div className="table-head"><span>DEVICE</span><span>STATUS</span><span>TRUST</span><span>LAST SEEN</span></div>
+
+    <section className="overview-columns even">
+      <SecurityChecksCard vulnerabilities={checks.vulnerabilities} onRefresh={checks.loadVulnerabilities} />
+      <BedtimeCard bedtime={checks.bedtime} onOpenDevice={openDevice} />
+    </section>
+
+    <article className="panel devices-panel">
+      <header><h2>Devices on your network</h2><button className="text-button" onClick={() => onNavigate("Devices")}>See all {devices.length}</button></header>
       {devices.slice(0, 6).map((device) => <DeviceRow key={device.id} device={device} onSelect={onSelect} />)}
-      {!devices.length && <div className="empty">Run a discovery scan to build your inventory.</div>}
+      {!devices.length && <p className="empty">No devices yet. Run a scan to find everything on your network.</p>}
     </article>
-  </>;
+  </div>;
 }
 
 function Devices({ devices, onSelect, onScan, busy }) {
   const [query, setQuery] = useState("");
   const filtered = devices.filter((d) => JSON.stringify(d).toLowerCase().includes(query.toLowerCase()));
+  const pending = devices.filter((device) => device.is_authorized === 0).length;
   return <section>
-    <div className="page-heading"><div><p className="eyebrow">INVENTORY</p><h1>Devices</h1><p className="subtle">Identify, trust, or block anything on your network.</p></div><button className="primary" onClick={onScan} disabled={busy}>{busy ? "Scanning…" : "Scan network"}</button></div>
-    <NetworkMap devices={devices} onSelect={onSelect}/>
-    <div className="toolbar card"><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, IP, MAC, vendor, or type…" /><span>{filtered.length} devices</span></div>
-    <article className="card panel devices-panel full">
-      <div className="table-head table-head--wide"><span>DEVICE</span><span>STATUS</span><span>TRUST</span><span>LAST SEEN</span><span>BANDWIDTH · 24H</span></div>
+    <div className="page-heading">
+      <div><h1>Devices</h1><p className="subtle">{plural(devices.length, "device")} on your network{pending ? `, ${pending} waiting for your review` : ""}.</p></div>
+      <button className="primary" onClick={onScan} disabled={busy}><Icon name="scan" />{busy ? "Scanning…" : "Scan network"}</button>
+    </div>
+    <div className="search"><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, IP, MAC, vendor, or type…" aria-label="Search devices" /><span>{plural(filtered.length, "result")}</span></div>
+    <article className="panel devices-panel full">
+      <div className="list-head wide"><span>Device</span><span>Status</span><span>Trust</span><span>Last seen</span><span>Data, 24h</span></div>
       {filtered.map((device) => <DeviceRow key={device.id} device={device} onSelect={onSelect} showBandwidth />)}
+      {!filtered.length && <p className="empty">No devices match “{query}”.</p>}
     </article>
   </section>;
 }
@@ -190,72 +243,221 @@ function DeviceDrawer({ device, onClose, onUpdate }) {
   const [traffic, setTraffic] = useState([]);
   const [policy, setPolicy] = useState(null);
   const [findings, setFindings] = useState([]);
+  const [saved, setSaved] = useState("");
+  const [policyError, setPolicyError] = useState("");
+  const [habits, setHabits] = useState(null);
   useEffect(() => {
     if (!device) return;
+    setSaved("");
+    setPolicyError("");
+    setHabits(null);
+    api(`/devices/${device.id}/habits`).then((result) => setHabits(result?.status ? result : null)).catch(() => setHabits(null));
     api(`/devices/${device.id}/trust`).then(setTrust).catch(() => {});
     api(`/devices/${device.id}/traffic?limit=30`).then(setTraffic).catch(() => {});
     api(`/devices/${device.id}/policy`).then(setPolicy).catch(() => {});
     api(`/devices/${device.id}/findings`).then(setFindings).catch(() => {});
   }, [device]);
   if (!device) return null;
-  const changeState = async (state) => {
-    const updated = await api(`/devices/${device.id}/authorization`, { method: "PATCH", body: JSON.stringify({ state }) });
+  const state = stateLabel(device);
+  const changeState = async (next) => {
+    const updated = await api(`/devices/${device.id}/authorization`, { method: "PATCH", body: JSON.stringify({ state: next }) });
     onUpdate(updated);
   };
   const savePolicy = async () => {
-    setPolicy(await api(`/devices/${device.id}/policy`, {method:"PUT",body:JSON.stringify(policy)}));
+    setPolicyError("");
+    try {
+      setPolicy(await api(`/devices/${device.id}/policy`, { method: "PUT", body: JSON.stringify(policy) }));
+      setSaved("Saved");
+    } catch (err) {
+      setSaved("");
+      setPolicyError(err.message || "Couldn't save. Try again.");
+    }
   };
-  return <div className="drawer-backdrop" onClick={onClose}><aside className="drawer" onClick={(e) => e.stopPropagation()}>
-    <button className="close" onClick={onClose}>×</button>
-    <span className={`device-glyph large ${tone(device.trust_score)}`}>{deviceGlyphs[device.device_type] || "?"}</span>
-    <p className="eyebrow">{device.device_type.replaceAll("_", " ")}</p>
-    <h2>{device.hostname || device.model || device.vendor || "Unknown device"}</h2>
-    <p className="subtle">{device.vendor || "Unknown manufacturer"} · {device.model || "Model unavailable"}</p>
-    <div className="detail-grid"><div><span>IP ADDRESS</span><strong>{device.ip}</strong></div><div><span>MAC ADDRESS</span><strong>{device.mac}</strong></div><div><span>TRUST SCORE</span><strong className={tone(device.trust_score)}>{device.trust_score}/100</strong></div><div><span>CONFIDENCE</span><strong>{Math.round((device.fingerprint_confidence || 0) * 100)}%</strong></div></div>
+  return <div className="drawer-backdrop" onClick={onClose}><aside className="drawer" role="dialog" aria-modal="true" aria-label={deviceName(device)} onClick={(e) => e.stopPropagation()}>
+    <button className="close" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+    <div className="drawer-head">
+      <span className={`device-avatar large ${state.key}`}><DeviceIcon type={device.device_type} /></span>
+      <div><h2>{deviceName(device)}</h2><p className="subtle">{deviceTypeLabel(device.device_type)} · {device.vendor || "Unknown maker"}{device.model ? ` ${device.model}` : ""}</p></div>
+    </div>
+    <dl className="facts">
+      <div><dt>Status</dt><dd><span className={`status ${state.key}`}>{state.label}</span></dd></div>
+      <div><dt>Trust score</dt><dd className={`${tone(device.trust_score)}-text`}>{device.trust_score} / 100</dd></div>
+      <div><dt>IP address</dt><dd className="mono">{device.ip}</dd></div>
+      <div><dt>Hardware address</dt><dd className="mono">{device.mac}</dd></div>
+      <div><dt>Identification</dt><dd>{Math.round((device.fingerprint_confidence || 0) * 100)}% confident</dd></div>
+      <div><dt>First seen</dt><dd>{timeAgo(device.first_seen)}</dd></div>
+    </dl>
     <div className="drawer-actions"><button className="primary" onClick={() => changeState(1)}>Authorize</button><button className="danger-button" onClick={() => changeState(2)}>Block</button><button onClick={() => changeState(0)}>Reset</button></div>
-    {policy && <section><h3>Internet policy</h3><label className="toggle-row"><span><b>Internet access</b><small>Pause DNS access for this device.</small></span><input type="checkbox" checked={policy.internet_enabled} onChange={(e)=>setPolicy({...policy,internet_enabled:e.target.checked})}/></label><div className="policy-times"><label><span>Pause from</span><input type="time" value={policy.block_start || ""} onChange={(e)=>setPolicy({...policy,block_start:e.target.value || null})}/></label><label><span>Until</span><input type="time" value={policy.block_end || ""} onChange={(e)=>setPolicy({...policy,block_end:e.target.value || null})}/></label></div><label className="domain-rule"><span>Blocked domains · comma separated</span><input value={(policy.blocked_domains || []).join(", ")} onChange={(e)=>setPolicy({...policy,blocked_domains:e.target.value.split(",").map(v=>v.trim()).filter(Boolean)})} placeholder="example.com, social.example"/></label><button onClick={savePolicy}>Save policy</button></section>}
-    <section><h3>Exposure findings</h3>{findings.map((finding)=><div className={`finding ${finding.severity}`} key={finding.id}><b>{finding.title}</b><p>{finding.description}</p><small>{finding.recommendation}</small></div>)}{!findings.length && <p className="subtle">No current exposure findings.</p>}</section>
-    <section><h3>Trust breakdown</h3>{trust?.reasons?.map((reason) => <p className="reason" key={reason}>{reason}</p>) || <p className="subtle">Calculating…</p>}</section>
-    <section><h3>Recent DNS activity</h3>{traffic.slice(0, 8).map((item) => <p className="traffic-line" key={item.id}><span>{item.domain || item.dest_ip}</span><b className={item.was_blocked ? "danger" : "good"}>{item.was_blocked ? "blocked" : "allowed"}</b></p>)}{!traffic.length && <p className="subtle">No traffic recorded yet.</p>}</section>
+    {habits && <section className="habits"><h3>Learned habits</h3>
+      {habits.status === "ready"
+        ? <><HabitProfile hours={habits.typical_active_hours} /><p className="subtle">{habits.last_explanation || "Home Radar knows when this device is usually active and will flag anything unusual."}</p></>
+        : <p className="subtle">Still learning: {habits.samples ?? 0} of {habits.samples_needed ?? 48} hours observed. Home Radar learns each device's normal routine before judging it.</p>}
+    </section>}
+    <section><h3>Why this trust score</h3>{trust?.reasons?.length ? <ul className="reasons">{trust.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul> : <p className="subtle">{trust ? "No notable signals yet." : "Calculating…"}</p>}</section>
+    {policy && <DeviceBedtime device={device} policy={policy} onPolicySaved={setPolicy} />}
+    {policy && <section><h3>Internet access</h3>
+      <label className="toggle-row"><span><b>Allow internet</b><small>Turn off to pause this device's internet lookups.</small></span><input type="checkbox" checked={policy.internet_enabled} onChange={(e) => setPolicy({ ...policy, internet_enabled: e.target.checked })} /></label>
+      <label className="field"><span>Blocked websites, separated by commas</span><input value={(policy.blocked_domains || []).join(", ")} onChange={(e) => setPolicy({ ...policy, blocked_domains: e.target.value.split(",").map((v) => v.trim()).filter(Boolean) })} placeholder="example.com, social.example" /></label>
+      {policyError && <p className="inline-error">{policyError}</p>}
+      <div className="row-end"><span className="good-text">{saved}</span><button onClick={savePolicy}>Save</button></div>
+    </section>}
+    <DeviceVulnerabilities deviceId={device.id} />
+    <DevicePrivacy deviceId={device.id} />
+    <section><h3>Exposure check</h3>{findings.map((finding) => <div className={`finding ${finding.severity}`} key={finding.id}><b>{finding.title}</b><p>{finding.description}</p><small>{finding.recommendation}</small></div>)}{!findings.length && <p className="subtle">Nothing risky found on this device.</p>}</section>
+    <section><h3>Recent websites</h3>{traffic.slice(0, 8).map((item) => <p className="traffic-line" key={item.id}><span className="mono">{item.domain || item.dest_ip}</span><b className={item.was_blocked ? "danger-text" : "subtle"}>{item.was_blocked ? "Blocked" : "Allowed"}</b></p>)}{!traffic.length && <p className="subtle">No activity recorded yet.</p>}</section>
   </aside></div>;
 }
 
 function Traffic({ traffic }) {
-  return <section><div className="page-heading"><div><p className="eyebrow">VISIBILITY</p><h1>Traffic</h1><p className="subtle">DNS activity and blocked destinations across your household.</p></div></div>
-    <div className="stats-grid wide"><Stat label="DNS QUERIES · 24H" value={traffic.queries || 0} detail="Observed locally"/><Stat label="BLOCKED" value={traffic.blocked || 0} detail="Threats and trackers" accent="amber"/><Stat label="DATA OBSERVED" value={`${Math.round(((traffic.bytes_sent || 0) + (traffic.bytes_received || 0))/1024)} KB`} detail="DNS proxy metadata" accent="blue"/></div>
-    <div className="two-column"><article className="card panel"><header><div><span>ACTIVITY</span><h3>Request volume</h3></div></header><ActivityChart timeline={traffic.timeline}/></article>
-    <article className="card panel"><header><div><span>TOP DESTINATIONS</span><h3>Most requested domains</h3></div></header>{(traffic.top_domains || []).map((item, index) => <div className="rank" key={item.domain}><b>{String(index+1).padStart(2,"0")}</b><span>{item.domain}</span><strong>{item.count}</strong></div>)}{!traffic.top_domains?.length && <div className="empty">DNS data will appear after clients use Home Radar.</div>}</article></div>
+  const kilobytes = Math.round(((traffic.bytes_sent || 0) + (traffic.bytes_received || 0)) / 1024);
+  return <section>
+    <div className="page-heading"><div><h1>Traffic</h1><p className="subtle">Which websites your devices look up, and what Home Radar stopped.</p></div></div>
+    <section className="summary compact" aria-label="Traffic summary">
+      <div className="fact"><b>{traffic.queries || 0}</b><span>lookups in the last 24 hours</span></div>
+      <div className="fact"><b className="warn-text">{traffic.blocked || 0}</b><span>blocked threats and trackers</span></div>
+      <div className="fact"><b>{kilobytes} KB</b><span>of traffic observed</span></div>
+    </section>
+    <div className="overview-columns">
+      <article className="panel"><header><h2>Requests by hour</h2></header><ActivityChart timeline={traffic.timeline} /><p className="legend"><span><i className="key" />Requests</span><span><i className="key blocked" />Blocked</span></p></article>
+      <article className="panel"><header><h2>Most visited</h2></header>
+        <ol className="ranking">{(traffic.top_domains || []).map((item) => <li key={item.domain}><span className="mono">{item.domain}</span><b>{item.count}</b></li>)}</ol>
+        {!traffic.top_domains?.length && <p className="empty">This fills in once devices use Home Radar for their internet lookups.</p>}
+      </article>
+    </div>
   </section>;
 }
 
-function Alerts({ alerts, onResolve, freshAlertIds = new Set() }) {
-  return <section><div className="page-heading"><div><p className="eyebrow">ATTENTION</p><h1>Alerts</h1><p className="subtle">Prioritized security events with clear next actions.</p></div></div>
-    <article className="card panel alert-page">{alerts.map((alert) => <div className={`alert-card${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}><b className={alert.severity}>!</b><div><span>{alert.severity}</span><h3>{alert.title}</h3><p>{alert.description}</p><small>{new Date(alert.created_at).toLocaleString()}</small></div><button onClick={() => onResolve(alert.id)}>Resolve</button></div>)}{!alerts.length && <div className="empty big">No open alerts. Everything looks calm.</div>}</article>
+function Alerts({ alerts, onResolve, onAlertAction, freshAlertIds = new Set() }) {
+  return <section>
+    <div className="page-heading"><div><h1>Alerts</h1><p className="subtle">Every alert explained in plain English, with a one-tap fix.</p></div></div>
+    <div className="alert-list">
+      {alerts.map((alert) => {
+        const severity = severityInfo(alert.severity);
+        return <article className={`alert-card ${severity.tone}${freshAlertIds.has(alert.id) ? " alert-new" : ""}`} key={alert.id}>
+          <i className={`sev ${severity.tone}`} aria-hidden="true" />
+          <div className="alert-body">
+            <p className="alert-meta"><span className={`${severity.tone}-text`}>{severity.label}</span><SimulatedTag alert={alert} /><time dateTime={alert.created_at}>{new Date(alert.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time></p>
+            <h3>{alert.title}</h3>
+            <AlertGuide alert={alert} onAct={onAlertAction} />
+            <details className="alert-detail"><summary>Technical details</summary><p>{alert.description}</p></details>
+          </div>
+          <button className="resolve" onClick={() => onResolve(alert.id)}>Resolve</button>
+        </article>;
+      })}
+      {!alerts.length && <div className="panel empty-state"><Icon name="shield" /><h2>All clear</h2><p className="subtle">No open alerts. Home Radar will let you know if anything changes.</p></div>}
+    </div>
   </section>;
+}
+
+function ReportCard({ data, onClose }) {
+  const { status = {}, devices = [], alerts = [], traffic = {} } = data;
+  const [household, setHousehold] = useState("");
+  const [extras, setExtras] = useState({});
+  useEffect(() => {
+    let cancelled = false;
+    api("/settings").then((result) => { if (!cancelled) setHousehold(result?.household_name || ""); }).catch(() => {});
+    const sources = { vulnerabilities: "/vulnerabilities", privacy: "/privacy/report?hours=24", bedtime: "/bedtime" };
+    Promise.allSettled(Object.values(sources).map((path) => api(path))).then((results) => {
+      if (cancelled) return;
+      const loaded = {};
+      Object.keys(sources).forEach((key, index) => { if (results[index].status === "fulfilled") loaded[key] = results[index].value; });
+      setExtras(loaded);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const score = status.security_score ?? 100;
+  const grade = letterGrade(score);
+  const pending = devices.filter((device) => device.is_authorized === 0).length;
+  const tips = reportTips({ devices, alerts, extras });
+  const privacyTotals = extras.privacy?.totals;
+  const topCompany = extras.privacy?.top_companies?.[0]?.company;
+  const vulnerable = (extras.vulnerabilities?.devices || []).filter((entry) => entry.status === "catalog_matches" && entry.kev_count > 0);
+  const bedtimes = extras.bedtime?.devices || [];
+  const today = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  return <div className="report-backdrop" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <article className="report">
+      <div className="report-actions">
+        <button className="primary" onClick={() => window.print()}>Print / Save as PDF</button>
+        <button onClick={onClose}>Close</button>
+      </div>
+      <header className="report-head">
+        <span className="brand-mark"><DeviceIcon name="radar" /></span>
+        <div><p className="kicker">Home security report card</p><h1 id="report-title">{household || "Your household"}</h1><p className="subtle">{today}</p></div>
+      </header>
+      <section className="report-grade">
+        <strong className={`${tone(score)}-text`}>{grade}</strong>
+        <div><h2>{gradeVerdict(grade)}</h2><p>Security score {score} of 100</p></div>
+      </section>
+      <section className="report-stats">
+        <div><strong>{status.device_count ?? devices.length}</strong><span>Devices protected</span></div>
+        <div><strong>{pending}</strong><span>Need review</span></div>
+        <div><strong>{traffic.blocked || 0}</strong><span>Threats blocked today</span></div>
+        <div><strong>{alerts.length}</strong><span>Open alerts</span></div>
+      </section>
+      <section className="report-section">
+        <h3>What needs attention</h3>
+        {alerts.slice(0, 5).map((alert) => {
+          const guide = explainAlert(alert);
+          return <div className="report-alert" key={alert.id}><b>{alert.title}{guide.simulated ? " (simulated)" : ""}</b><p>{guide.meaning}</p><p><i>What to do:</i> {guide.action}</p></div>;
+        })}
+        {!alerts.length && <p>Nothing right now. Your network is quiet.</p>}
+      </section>
+      {(privacyTotals?.dns_queries > 0 || extras.vulnerabilities?.status || bedtimes.length > 0) && <section className="report-section" data-testid="report-privacy-security">
+        <h3>Privacy and security</h3>
+        <ul className="report-list">
+          {privacyTotals?.dns_queries > 0 && <li>{privacyTotals.tracker_requests
+            ? `Your devices contacted ${plural(privacyTotals.companies || 0, "tracking company", "tracking companies")} ${Number(privacyTotals.tracker_requests).toLocaleString()} times in the last 24 hours${topCompany ? `, most often ${topCompany}` : ""}. Home Radar blocked ${Number(privacyTotals.blocked_requests || 0).toLocaleString()} of them.`
+            : "None of your devices contacted a known tracking company in the last 24 hours."}</li>}
+          {extras.vulnerabilities?.status === "catalog_empty" && <li>{extras.vulnerabilities.message}</li>}
+          {extras.vulnerabilities?.status === "ok" && <li>{vulnerable.length
+            ? `${plural(vulnerable.length, "device comes", "devices come")} from makers with actively exploited vulnerabilities on CISA's list: ${vulnerable.map((entry) => entry.name).join(", ")}. That doesn't mean they're affected; keep their software up to date.`
+            : "No device matched a maker on CISA's list of actively exploited vulnerabilities."}</li>}
+          {bedtimes.map((entry) => <li key={entry.device_id}>Bedtime for {entry.name}: {formatClock(entry.block_start) && formatClock(entry.block_end) ? `every night, ${formatClock(entry.block_start)} to ${formatClock(entry.block_end)}` : entry.summary}.</li>)}
+        </ul>
+      </section>}
+      <section className="report-section">
+        <h3>Your next 3 steps</h3>
+        <ol>{tips.map((tip) => <li key={tip}>{tip}</li>)}</ol>
+      </section>
+      <section className="report-section">
+        <h3>Devices on your network</h3>
+        <table className="report-table">
+          <thead><tr><th>Device</th><th>Type</th><th>Status</th><th>Trust</th></tr></thead>
+          <tbody>{devices.map((device) => <tr key={device.id}><td>{deviceName(device)}</td><td>{deviceTypeLabel(device.device_type)}</td><td>{stateLabel(device).label}</td><td>{device.trust_score ?? "-"}</td></tr>)}</tbody>
+        </table>
+        {!devices.length && <p>No devices discovered yet. Run a scan first.</p>}
+      </section>
+      <footer className="report-foot">Generated by Home Radar, free and open-source home network security. Your network data stays on your own computer.</footer>
+    </article>
+  </div>;
 }
 
 function SetupWizard({ onComplete }) {
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState({household_name:"My Home",digest_email:"",dns_upstream:"1.1.1.1",notifications_enabled:true});
+  const [form, setForm] = useState({ household_name: "My Home", digest_email: "", dns_upstream: "1.1.1.1", notifications_enabled: true });
   const [busy, setBusy] = useState(false);
   const finish = async () => {
     setBusy(true);
     try {
-      await api("/setup", {method:"POST",body:JSON.stringify(form)});
+      await api("/setup", { method: "POST", body: JSON.stringify(form) });
       onComplete();
     } finally { setBusy(false); }
   };
-  return <div className="setup-backdrop"><section className="setup card">
-    <div className="setup-logo"><div className="radar-logo"><i/><i/><i/></div><strong>Home<span>Radar</span></strong></div>
-    <div className="steps"><i className={step >= 0 ? "active":""}/><i className={step >= 1 ? "active":""}/><i className={step >= 2 ? "active":""}/></div>
-    {step === 0 && <><p className="eyebrow">WELCOME HOME</p><h1>Turn this machine into your network lookout.</h1><p className="subtle">Home Radar discovers devices, filters DNS threats, and explains what needs attention. Everything stays on this appliance.</p><label><span>What should we call this household?</span><input value={form.household_name} onChange={(e)=>setForm({...form,household_name:e.target.value})}/></label></>}
-    {step === 1 && <><p className="eyebrow">PROTECTION</p><h1>Choose safe network defaults.</h1><p className="subtle">Allowed DNS requests go to this upstream resolver. You will test one device before changing the router.</p><label><span>Upstream DNS</span><input value={form.dns_upstream} onChange={(e)=>setForm({...form,dns_upstream:e.target.value})}/></label><label><span>Weekly digest email (optional)</span><input type="email" value={form.digest_email} onChange={(e)=>setForm({...form,digest_email:e.target.value})} placeholder="family@example.com"/></label></>}
-    {step === 2 && <><p className="eyebrow">FINAL CHECK</p><h1>Start with visibility, then activate DNS.</h1><div className="setup-checks"><p><b>1</b> Open the dashboard and run discovery.</p><p><b>2</b> Test one client using this appliance for DNS.</p><p><b>3</b> Only then update the router DHCP DNS setting.</p></div><label className="toggle-row"><span><b>Browser notifications</b><small>Notify this browser about new security alerts.</small></span><input type="checkbox" checked={form.notifications_enabled} onChange={(e)=>setForm({...form,notifications_enabled:e.target.checked})}/></label></>}
-    <footer>{step > 0 ? <button onClick={()=>setStep(step-1)}>Back</button>:<span/>}{step < 2 ? <button className="primary" onClick={()=>setStep(step+1)} disabled={!form.household_name.trim()}>Continue</button>:<button className="primary" onClick={finish} disabled={busy}>{busy?"Saving…":"Open Home Radar"}</button>}</footer>
+  return <div className="setup-backdrop"><section className="setup" aria-labelledby="setup-title">
+    <div className="setup-top"><span className="brand-mark"><DeviceIcon name="radar" /></span><span>Home Radar</span><span className="step-count">Step {step + 1} of 3</span></div>
+    {step === 0 && <><h1 id="setup-title">Turn this machine into your network lookout.</h1><p className="subtle">Home Radar finds every device on your network, blocks dangerous websites, and explains anything that needs your attention. Everything stays on this computer.</p><label className="field"><span>What should we call this household?</span><input value={form.household_name} onChange={(e) => setForm({ ...form, household_name: e.target.value })} /></label></>}
+    {step === 1 && <><h1 id="setup-title">Choose safe network defaults.</h1><p className="subtle">Allowed requests go to this upstream DNS service. You'll test one device before changing anything on your router.</p><label className="field"><span>Upstream DNS</span><input value={form.dns_upstream} onChange={(e) => setForm({ ...form, dns_upstream: e.target.value })} /></label><label className="field"><span>Weekly summary email (optional)</span><input type="email" value={form.digest_email} onChange={(e) => setForm({ ...form, digest_email: e.target.value })} placeholder="family@example.com" /></label></>}
+    {step === 2 && <><h1 id="setup-title">Start with visibility, then activate DNS.</h1><ol className="setup-checks"><li>Open the dashboard and run a scan.</li><li>Point one device at Home Radar for DNS and make sure it works.</li><li>Then update your router so every device uses it.</li></ol><label className="toggle-row"><span><b>Browser notifications</b><small>Get a notification here when something needs you.</small></span><input type="checkbox" checked={form.notifications_enabled} onChange={(e) => setForm({ ...form, notifications_enabled: e.target.checked })} /></label></>}
+    <footer>{step > 0 ? <button onClick={() => setStep(step - 1)}>Back</button> : <span />}{step < 2 ? <button className="primary" onClick={() => setStep(step + 1)} disabled={!form.household_name.trim()}>Continue</button> : <button className="primary" onClick={finish} disabled={busy}>{busy ? "Saving…" : "Open Home Radar"}</button>}</footer>
   </section></div>;
 }
 
-function Settings({ onRefreshDashboard }) {
+function Notice({ tone: kind = "info", text, detail }) {
+  if (!text) return null;
+  return <div className={`notice ${kind}`} role="status"><p>{text}</p>{detail && detail !== text && <details><summary>Details</summary><p className="mono">{detail}</p></details>}</div>;
+}
+
+function Settings({ onRefreshDashboard, onPlayDemoStory, demoStory = {} }) {
   const [form, setForm] = useState({});
   const [message, setMessage] = useState("");
   const [health, setHealth] = useState(null);
@@ -268,76 +470,86 @@ function Settings({ onRefreshDashboard }) {
   const [now, setNow] = useState(Date.now());
   const [blocklists, setBlocklists] = useState(null);
   const [blocklistBusy, setBlocklistBusy] = useState(false);
+  const [blocklistError, setBlocklistError] = useState("");
   const [digestPreview, setDigestPreview] = useState(null);
   const [digestBusy, setDigestBusy] = useState(false);
-  const [digestSentMsg, setDigestSentMsg] = useState("");
+  const [digestNotice, setDigestNotice] = useState(null);
   const [cisaQuery, setCisaQuery] = useState("");
   const [cisaResults, setCisaResults] = useState(null);
   const [cisaBusy, setCisaBusy] = useState(false);
   const [cisaUpdateBusy, setCisaUpdateBusy] = useState(false);
-  const [cisaMsg, setCisaMsg] = useState("");
+  const [cisaNotice, setCisaNotice] = useState(null);
   const [demoBusy, setDemoBusy] = useState("");
   const [demoMsg, setDemoMsg] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [formError, setFormError] = useState("");
+  const [blocklistNotice, setBlocklistNotice] = useState(null);
   const refreshSystem = () => {
-    api("/health").then(setHealth);
-    api("/backups").then((result)=>setBackups(result.backups));
-    api("/blocklists").then(setBlocklists);
+    api("/health").then(setHealth).catch(() => {});
+    api("/backups").then((result) => setBackups(result?.backups || [])).catch(() => {});
+    api("/blocklists").then(setBlocklists).catch(() => {});
   };
-  useEffect(() => { api("/settings").then(setForm); refreshSystem(); }, []);
+  useEffect(() => { api("/settings").then(setForm).catch(() => {}); refreshSystem(); }, []);
 
   const updateBlocklists = async () => {
     setBlocklistBusy(true);
+    setBlocklistError("");
+    setBlocklistNotice(null);
     try {
       const result = await api("/blocklists/update", { method: "POST" });
-      setBlocklists(result);
+      setBlocklists((current) => ({ ...current, ...result }));
+      if (result?.message) {
+        const failures = (result.sources || []).filter((source) => source.ok === false);
+        setBlocklistNotice({
+          tone: result.ok === false ? "warn" : "good",
+          text: result.message,
+          detail: failures.map((source) => `${source.url || source.source}: ${source.error_detail || source.error || source.error_friendly}`).join("\n") || undefined,
+        });
+      }
+    } catch (err) {
+      setBlocklistError(err.message || "Update failed");
     } finally {
       setBlocklistBusy(false);
     }
   };
-
   const loadDigestPreview = async () => {
     try {
-      const result = await api("/digest/preview");
-      setDigestPreview(result);
-    } catch (e) {
-      setDigestPreview({ subject: "Error", body: e.message });
+      setDigestPreview(await api("/digest/preview"));
+    } catch (err) {
+      setDigestNotice({ tone: "warn", text: friendlyError(err.message), detail: err.message });
     }
   };
-
   const sendDigest = async () => {
     setDigestBusy(true);
-    setDigestSentMsg("");
+    setDigestNotice(null);
     try {
       await api("/digest/send", { method: "POST" });
-      setDigestSentMsg("Digest sent successfully!");
-    } catch (e) {
-      setDigestSentMsg("Error: " + e.message);
+      setDigestNotice({ tone: "good", text: "Sent. Check your inbox." });
+    } catch (err) {
+      setDigestNotice({ tone: "warn", text: friendlyError(err.message), detail: err.message });
     } finally {
       setDigestBusy(false);
     }
   };
-
-  const searchCisa = async (e) => {
-    e.preventDefault();
+  const searchCisa = async (event) => {
+    event.preventDefault();
     setCisaBusy(true);
     try {
-      const results = await api(`/threat-intel/cisa-kev?query=${encodeURIComponent(cisaQuery)}`);
-      setCisaResults(results);
+      setCisaResults(await api(`/threat-intel/cisa-kev?query=${encodeURIComponent(cisaQuery)}`));
     } catch (err) {
       setCisaResults([]);
     } finally {
       setCisaBusy(false);
     }
   };
-
   const updateCisa = async () => {
     setCisaUpdateBusy(true);
-    setCisaMsg("");
+    setCisaNotice(null);
     try {
       const result = await api("/threat-intel/cisa-kev/update", { method: "POST" });
-      setCisaMsg(`Updated ${result.records} records from ${result.source}`);
+      setCisaNotice({ tone: "good", text: `Updated: ${Number(result.records || 0).toLocaleString()} known vulnerabilities on file.` });
     } catch (err) {
-      setCisaMsg(`Error: ${err.message}`);
+      setCisaNotice({ tone: "warn", text: friendlyError(err.message, "update"), detail: err.message });
     } finally {
       setCisaUpdateBusy(false);
     }
@@ -354,8 +566,40 @@ function Settings({ onRefreshDashboard }) {
     if (form.notifications_enabled && "Notification" in window && Notification.permission === "default") {
       await Notification.requestPermission();
     }
-    setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
-    setMessage("Settings saved");
+    setMessage("");
+    setFieldErrors({});
+    setFormError("");
+    try {
+      setForm(await api("/settings", { method: "PATCH", body: JSON.stringify(form) }));
+      setMessage("Saved");
+    } catch (err) {
+      const fields = err.fields || {};
+      setFieldErrors(fields);
+      setFormError(Object.keys(fields).length ? "Fix the highlighted fields, then save again." : (err.message || "Couldn't save. Try again."));
+    }
+  };
+  const loadHouseholdActivity = async () => {
+    setDemoBusy("household");
+    setDemoMsg("");
+    try {
+      const result = await api("/demo/household-activity", { method: "POST" });
+      const bedtimeDevice = (result?.devices || []).find((item) => item.device_id === result?.bedtime?.device_id);
+      const parts = [
+        plural(result?.devices?.length || 0, "device"),
+        `${Number(result?.dns_queries || 0).toLocaleString()} website lookups`,
+      ];
+      if (bedtimeDevice) parts.push(`a ${formatClock(result.bedtime.block_start)} bedtime for ${bedtimeDevice.name}`);
+      setDemoMsg(`Added simulated activity: ${parts.join(", ")}. Everything added is labeled as simulated.`);
+      await onRefreshDashboard?.();
+    } catch (err) {
+      setDemoMsg(
+        err.status === 404
+          ? "Demo mode isn't enabled on this appliance. Set HOMERADAR_DEMO_MODE=true to turn it on."
+          : `Error: ${err.message}`,
+      );
+    } finally {
+      setDemoBusy("");
+    }
   };
   const startPairing = async () => {
     setPairBusy(true);
@@ -387,7 +631,7 @@ function Settings({ onRefreshDashboard }) {
     setDemoMsg("");
     try {
       await api("/demo/simulate-attack", { method: "POST", body: JSON.stringify({ kind }) });
-      setDemoMsg("Alert triggered — check Overview or Alerts.");
+      setDemoMsg("Alert triggered. Check Home or Alerts.");
       await onRefreshDashboard?.();
     } catch (err) {
       setDemoMsg(
@@ -399,97 +643,105 @@ function Settings({ onRefreshDashboard }) {
       setDemoBusy("");
     }
   };
-  return <section><div className="page-heading"><div><p className="eyebrow">APPLIANCE</p><h1>Settings</h1><p className="subtle">Configure your household, DNS, and digest preferences.</p></div></div>
-    <div className="settings-grid"><form className="card settings-form" onSubmit={save}>
-      <label><span>Household name</span><input value={form.household_name || ""} onChange={(e) => setForm({...form, household_name:e.target.value})}/></label>
-      <label><span>Weekly digest email</span><input type="email" value={form.digest_email || ""} onChange={(e) => setForm({...form, digest_email:e.target.value})} placeholder="family@example.com"/></label>
-      <label><span>Upstream DNS resolver</span><input value={form.dns_upstream || ""} onChange={(e) => setForm({...form, dns_upstream:e.target.value})}/></label>
-      <label><span>Custom DNS Records (JSON)</span><textarea style={{width: '100%', minHeight: '80px', border: '1px solid var(--line)', borderRadius: '7px', background: '#071511', color: 'var(--text)', padding: '10px 12px', outline: 'none', fontSize: '11px', fontFamily: 'monospace'}} value={form.custom_dns_records || "{}"} onChange={(e) => setForm({...form, custom_dns_records:e.target.value})} placeholder='{"example.lan": "192.168.1.1"}'/></label>
-      <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while the dashboard is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({...form, notifications_enabled:e.target.checked})}/></label>
-      <div className="form-footer"><span className="good">{message}</span><button className="primary">Save settings</button></div>
-    </form><aside className="card system-card"><p className="eyebrow">SYSTEM HEALTH</p><h2 className={health?.status === "healthy" ? "good":"warn"}>{health?.status || "Checking…"}</h2>
-      <div className="system-metrics"><p><span>DATABASE</span><b>{health?.database || "-"}</b></p><p><span>FREE DISK</span><b>{health ? `${health.disk.free_percent}%`:"-"}</b></p><p><span>BACKUPS</span><b>{backups.length}</b></p><p><span>DNS</span><b>{health?.dns.enabled ? "ON":"OFF"}</b></p></div>
-      {(health?.warnings || []).map((warning)=><p className="health-warning" key={warning}>! {warning}</p>)}
-      <button onClick={async()=>{await api("/backups",{method:"POST"});refreshSystem();}}>Create backup</button>
-      {backups[0] && <a href={`/backups/${backups[0].name}`}>Download latest backup</a>}
-    </aside>
-    <aside className="card system-card">
-      <p className="eyebrow">THREAT INTEL</p>
-      <h2>Blocklists</h2>
-      <p className="subtle">Ad and malware domains currently blocked.</p>
-      <div className="system-metrics">
-        <p><span>DOMAINS</span><b>{blocklists?.domain_count?.toLocaleString() || "0"}</b></p>
-        <p><span>SOURCES</span><b>{blocklists?.sources?.length || "0"}</b></p>
-      </div>
-      <button onClick={updateBlocklists} disabled={blocklistBusy} style={{ marginTop: "14px" }}>
-        {blocklistBusy ? "Updating…" : "Update blocklists"}
-      </button>
-    </aside>
-    <aside className="card system-card">
-      <p className="eyebrow">COMMUNICATION</p>
-      <h2>Weekly Digest</h2>
-      <p className="subtle">Preview or manually send the security digest.</p>
-      {digestPreview ? (
-        <div style={{ marginTop: "10px", padding: "10px", background: "#0a1915", borderRadius: "7px", border: "1px solid var(--line)" }}>
-          <strong style={{ display: "block", marginBottom: "5px", fontSize: "10px" }}>Subject: {digestPreview.subject}</strong>
-          <pre style={{ margin: 0, fontSize: "9px", whiteSpace: "pre-wrap", color: "var(--muted)" }}>{digestPreview.body}</pre>
-        </div>
-      ) : (
-        <button onClick={loadDigestPreview} style={{ marginTop: "14px" }}>Preview Digest</button>
-      )}
-      <button onClick={sendDigest} disabled={digestBusy} style={{ marginTop: "14px", background: "var(--green)", color: "#062016" }}>
-        {digestBusy ? "Sending…" : "Send Digest Now"}
-      </button>
-      {digestSentMsg && <p className={digestSentMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{digestSentMsg}</p>}
-    </aside>
-    <aside className="card system-card pairing-card">
-      <p className="eyebrow">THREAT INTEL</p>
-      <h2>CISA KEV Catalog</h2>
-      <p className="subtle">Search the Known Exploited Vulnerabilities catalog.</p>
-      <form onSubmit={searchCisa} style={{ display: "flex", gap: "10px", marginTop: "14px", marginBottom: "14px" }}>
-        <input type="text" value={cisaQuery} onChange={(e) => setCisaQuery(e.target.value)} placeholder="Search vendor, product, or CVE..." style={{ flex: 1, padding: "8px", background: "#071511", border: "1px solid var(--line)", borderRadius: "7px", color: "var(--text)" }} />
-        <button type="submit" disabled={cisaBusy} style={{ padding: "8px 12px" }}>{cisaBusy ? "..." : "Search"}</button>
+  const domainCount = blocklists?.domain_count || 0;
+  const healthy = health?.status === "healthy";
+  return <section className="settings">
+    <div className="page-heading"><div><h1>Settings</h1><p className="subtle">Your household, protection, and this computer.</p></div></div>
+
+    <div className="settings-group">
+      <h2>Household</h2>
+      <form className="panel settings-form" onSubmit={save}>
+        <label className="field"><span>Household name</span><input aria-invalid={!!fieldErrors.household_name} value={form.household_name || ""} onChange={(e) => setForm({ ...form, household_name: e.target.value })} />{fieldErrors.household_name && <small className="field-error">{fieldErrors.household_name}</small>}</label>
+        <label className="field"><span>Weekly summary email</span><input type="email" aria-invalid={!!fieldErrors.digest_email} value={form.digest_email || ""} onChange={(e) => setForm({ ...form, digest_email: e.target.value })} placeholder="family@example.com" />{fieldErrors.digest_email && <small className="field-error">{fieldErrors.digest_email}</small>}</label>
+        <label className="field"><span>Upstream DNS</span><input aria-invalid={!!fieldErrors.dns_upstream} value={form.dns_upstream || ""} onChange={(e) => setForm({ ...form, dns_upstream: e.target.value })} />{fieldErrors.dns_upstream && <small className="field-error">{fieldErrors.dns_upstream}</small>}</label>
+        <label className="toggle-row"><span><b>Browser notifications</b><small>Show alerts while this page is open.</small></span><input type="checkbox" checked={!!form.notifications_enabled} onChange={(e) => setForm({ ...form, notifications_enabled: e.target.checked })} /></label>
+        <details className="advanced"><summary>Advanced: custom DNS records</summary>
+          <label className="field"><span>Names Home Radar should answer itself (JSON)</span><textarea className="mono" aria-invalid={!!fieldErrors.custom_dns_records} value={form.custom_dns_records || "{}"} onChange={(e) => setForm({ ...form, custom_dns_records: e.target.value })} placeholder='{"printer.lan": "192.168.1.20"}' />{fieldErrors.custom_dns_records && <small className="field-error">{fieldErrors.custom_dns_records}</small>}</label>
+        </details>
+        <div className="row-end">{formError ? <span className="danger-text" role="alert">{formError}</span> : <span className="good-text">{message}</span>}<button className="primary">Save settings</button></div>
       </form>
-      {cisaResults && (
-        <div style={{ maxHeight: "200px", overflowY: "auto", background: "#0a1915", border: "1px solid var(--line)", borderRadius: "7px", padding: "10px" }}>
-          {cisaResults.length === 0 ? <p className="subtle">No results found.</p> : cisaResults.map(r => (
-            <div key={r.cve_id} style={{ borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
-              <strong style={{ color: "var(--amber)", fontSize: "11px" }}>{r.cve_id}</strong>
-              <p style={{ margin: "4px 0", fontSize: "10px" }}>{r.vendor_project} {r.product}</p>
-              <small style={{ color: "var(--muted)", fontSize: "9px" }}>{r.vulnerability_name}</small>
-            </div>
-          ))}
+    </div>
+
+    <div className="settings-group">
+      <h2>Protection</h2>
+      <div className="panel">
+        <div className="setting-row">
+          <div><b>Dangerous website blocklists</b><p className="subtle">{domainCount ? `Blocking ${domainCount.toLocaleString()} known malware, phishing, and tracking domains${blocklists?.sources?.length ? ` from ${plural(blocklists.sources.length, "source")}` : ""}.` : "Blocklists haven't downloaded yet."}</p></div>
+          <button onClick={updateBlocklists} disabled={blocklistBusy}>{blocklistBusy ? "Updating…" : "Update now"}</button>
         </div>
-      )}
-      <button onClick={updateCisa} disabled={cisaUpdateBusy} style={{ marginTop: "14px", width: "100%" }}>
-        {cisaUpdateBusy ? "Updating…" : "Update Catalog"}
-      </button>
-      {cisaMsg && <p className={cisaMsg.startsWith("Error") ? "health-warning" : "good"} style={{ marginTop: "10px", fontSize: "10px" }}>{cisaMsg}</p>}
-    </aside>
-    <aside className="card system-card pairing-card">
-      <p className="eyebrow">DEVICE PAIRING</p>
-      <h2>Pair a mobile device</h2>
-      <p className="subtle">Generate a one-time code to link a phone or tablet to this appliance.</p>
-      {pairing
-        ? <div className="pairing-code-block"><strong className="pairing-code">{pairing.code}</strong><small>Expires in {pairRemaining}s</small></div>
-        : <button onClick={startPairing} disabled={pairBusy}>{pairBusy ? "Generating…" : "Generate pairing code"}</button>}
-      {pairError && <p className="health-warning">! {pairError}</p>}
-      <div className="toggle-row">
-        <span><b>Rotate access token</b><small>Invalidate the current token and mint a new one.</small></span>
+        <Notice tone="warn" text={blocklistError && friendlyError(blocklistError, "update")} detail={blocklistError} />
+        <Notice {...(blocklistNotice || {})} />
+        <div className="setting-row stacked">
+          <div><b>Known exploited vulnerabilities</b><p className="subtle">Search the U.S. government's CISA list of security flaws attackers are actively using.</p></div>
+          <form className="inline-form" onSubmit={searchCisa}>
+            <input type="text" value={cisaQuery} onChange={(e) => setCisaQuery(e.target.value)} placeholder="Search a brand, product, or CVE" aria-label="Search known vulnerabilities" />
+            <button type="submit" disabled={cisaBusy}>{cisaBusy ? "Searching…" : "Search"}</button>
+            <button type="button" onClick={updateCisa} disabled={cisaUpdateBusy}>{cisaUpdateBusy ? "Updating…" : "Update list"}</button>
+          </form>
+          <Notice {...(cisaNotice || {})} />
+          {cisaResults && <ul className="cve-list">{cisaResults.length === 0 ? <li className="subtle">No matches.</li> : cisaResults.map((result) => <li key={result.cve_id}><b className="mono">{result.cve_id}</b><span>{result.vendor_project} {result.product}</span><small>{result.vulnerability_name}</small></li>)}</ul>}
+        </div>
       </div>
-      <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
-      {regenMessage && <p className={regenMessage === "Token regenerated" ? "good" : "health-warning"}>{regenMessage === "Token regenerated" ? regenMessage : `! ${regenMessage}`}</p>}
-    </aside>
-    <aside className="card system-card pairing-card">
-      <p className="eyebrow">LIVE DEMO</p>
-      <h2>Simulate an attack</h2>
-      <p className="subtle">Trigger a real, dashboard-visible alert to show how Home Radar reacts — no real attack traffic needed.</p>
-      <div className="demo-actions">
-        <button onClick={() => simulateAttack("deauth")} disabled={!!demoBusy}>{demoBusy === "deauth" ? "Triggering…" : "Simulate Wi-Fi deauth attack"}</button>
-        <button onClick={() => simulateAttack("malicious_dns")} disabled={!!demoBusy}>{demoBusy === "malicious_dns" ? "Triggering…" : "Simulate malicious connection"}</button>
+    </div>
+
+    <div className="settings-group">
+      <h2>Weekly summary email</h2>
+      <div className="panel">
+        <div className="setting-row">
+          <div><b>Security summary</b><p className="subtle">A short weekly email: new devices, blocked threats, and one tip.</p></div>
+          <div className="button-pair">{!digestPreview && <button onClick={loadDigestPreview}>Preview</button>}<button onClick={sendDigest} disabled={digestBusy}>{digestBusy ? "Sending…" : "Send now"}</button></div>
+        </div>
+        <Notice {...(digestNotice || {})} />
+        {digestPreview && <div className="email-preview"><b>{digestPreview.subject}</b><pre>{digestPreview.body}</pre></div>}
       </div>
-      {demoMsg && <p className={demoMsg.startsWith("Error") || demoMsg.startsWith("Demo mode") ? "health-warning" : "good"}>{demoMsg}</p>}
-    </aside></div>
+    </div>
+
+    <div className="settings-group">
+      <h2>Phones and tablets</h2>
+      <div className="panel">
+        <div className="setting-row">
+          <div><b>Pair the mobile app</b><p className="subtle">Get a one-time code, then type it into the Home Radar app on your phone.</p></div>
+          {pairing
+            ? <div className="pairing-code-block"><strong className="pairing-code mono">{pairing.code}</strong><small>Expires in {pairRemaining}s</small></div>
+            : <button onClick={startPairing} disabled={pairBusy}>{pairBusy ? "Generating…" : "Generate pairing code"}</button>}
+        </div>
+        {pairError && <Notice tone="warn" text={pairError} />}
+        <div className="setting-row">
+          <div><b>Sign out every phone</b><p className="subtle">Creates a new access token, so paired phones have to pair again.</p></div>
+          <button onClick={regenerateToken} disabled={regenBusy}>{regenBusy ? "Regenerating…" : "Regenerate token"}</button>
+        </div>
+        {regenMessage && <Notice tone={regenMessage === "Token regenerated" ? "good" : "warn"} text={regenMessage} />}
+      </div>
+    </div>
+
+    <div className="settings-group">
+      <h2>This computer</h2>
+      <div className="panel">
+        <div className="setting-row">
+          <div><b className={health ? (healthy ? "good-text" : "warn-text") : ""}>{health ? (healthy ? "Running normally" : "Needs attention") : "Checking…"}</b><p className="subtle">Database {health?.database || "…"} · {health ? `${health.disk.free_percent}% disk free` : "…"} · {plural(backups.length, "backup")} · DNS filtering {health?.dns?.enabled ? "on" : "off"}</p></div>
+          <div className="button-pair"><button onClick={async () => { await api("/backups", { method: "POST" }); refreshSystem(); }}>Create backup</button>{backups[0] && <a className="button" href={`/backups/${backups[0].name}`}>Download latest</a>}</div>
+        </div>
+        {(health?.warnings || []).map((warning) => <Notice key={warning} tone="warn" text={warning} />)}
+      </div>
+    </div>
+
+    <div className="settings-group">
+      <h2>Presentation mode</h2>
+      <div className="panel">
+        <div className="setting-row stacked">
+          <div><b>Demo scenarios</b><p className="subtle">Show how Home Radar reacts without real attack traffic. Every simulated event is labeled as simulated.</p></div>
+          <div className="demo-actions">
+            <button className="primary" onClick={() => onPlayDemoStory?.()} disabled={!!demoBusy || demoStory.running}><Icon name="play" />{demoStory.running ? "Demo story playing…" : "Play demo story"}</button>
+            <button onClick={() => simulateAttack("deauth")} disabled={!!demoBusy}>{demoBusy === "deauth" ? "Triggering…" : "Simulate Wi-Fi deauth attack"}</button>
+            <button onClick={() => simulateAttack("malicious_dns")} disabled={!!demoBusy}>{demoBusy === "malicious_dns" ? "Triggering…" : "Simulate malicious connection"}</button>
+            <button onClick={loadHouseholdActivity} disabled={!!demoBusy}>{demoBusy === "household" ? "Loading…" : "Load sample household activity"}</button>
+          </div>
+          <p className="subtle small-note">The demo story opens Live view: a new device joins, then it contacts a malware server, then a Wi-Fi attack starts. Sample household activity fills the Privacy page, bedtimes, and security checks with labeled simulated data.</p>
+          {demoMsg && <Notice tone={demoMsg.startsWith("Error") || demoMsg.startsWith("Demo mode") ? "warn" : "good"} text={demoMsg} />}
+          {demoStory.message && <Notice tone="warn" text={demoStory.message} />}
+        </div>
+      </div>
+    </div>
   </section>;
 }
 
@@ -502,16 +754,31 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState(true);
   const [freshAlertIds, setFreshAlertIds] = useState(() => new Set());
   const [scanMessage, setScanMessage] = useState("");
+  const [showReport, setShowReport] = useState(false);
+  const [demoStory, setDemoStory] = useState({ running: false, step: 0, message: "" });
+  const [liveEvent, setLiveEvent] = useState(null);
+  const [demoKnownOff, setDemoKnownOff] = useState(false);
+  const eventCounter = useRef(0);
+  const storyTimer = useRef(null);
+  const storyCancelled = useRef(false);
+  useEffect(() => {
+    storyCancelled.current = false;
+    return () => { storyCancelled.current = true; clearTimeout(storyTimer.current); };
+  }, []);
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, [page]);
   const seenAlerts = useRef(new Set());
   const alertsInitialized = useRef(false);
   const load = () => api("/dashboard").then(setData).catch(() => setConnected(false));
   useEffect(() => {
     load();
-    api("/setup").then((result)=>setSetupComplete(result.complete)).catch(()=>{});
+    api("/setup").then((result) => setSetupComplete(result.complete)).catch(() => {});
     let socket;
     let retry;
     const connect = () => {
-      socket = dashboardSocket((snapshot) => { setData((current) => ({...current, ...snapshot})); setConnected(true); });
+      socket = dashboardSocket((snapshot) => { setData((current) => ({ ...current, ...snapshot, status: { ...current.status, ...snapshot.status } })); setConnected(true); });
       socket.onclose = () => { setConnected(false); retry = setTimeout(connect, 2500); };
       socket.onerror = () => socket.close();
     };
@@ -551,7 +818,7 @@ export default function App() {
     try {
       const result = await api("/scan", { method: "POST" });
       const count = result?.devices_found ?? 0;
-      setScanMessage(count > 0 ? `Scan complete — found ${count} device${count === 1 ? "" : "s"}.` : "Scan complete — no devices responded. This is expected for a desktop app without raw-network access; see docs/INSTALL.md for full LAN discovery.");
+      setScanMessage(count > 0 ? `Scan complete. Found ${count} device${count === 1 ? "" : "s"}.` : "Scan complete. No devices responded. Check that this computer is on your home Wi-Fi or network cable.");
       await load();
     } catch (err) {
       setScanMessage(`Scan failed: ${err.message}`);
@@ -559,24 +826,85 @@ export default function App() {
       setBusy(false);
     }
   };
-  const resolve = async (id) => { await api(`/alerts/${id}`, {method:"PATCH", body:JSON.stringify({resolved:true})}); await load(); };
-  const title = useMemo(() => page === "Overview" ? "Command center" : page, [page]);
-  return <div className="shell">
+  const resolve = async (id) => { await api(`/alerts/${id}`, { method: "PATCH", body: JSON.stringify({ resolved: true }) }); await load(); };
+  const actOnAlertDevice = async (alert, state) => {
+    try {
+      await api(`/devices/${alert.device_id}/authorization`, { method: "PATCH", body: JSON.stringify({ state }) });
+      await api(`/alerts/${alert.id}`, { method: "PATCH", body: JSON.stringify({ resolved: true }) });
+    } finally {
+      await load();
+    }
+  };
+  // Throws on failure so the demo story can stop; single scenario clicks show the error inline.
+  const runScenario = async (kind) => {
+    eventCounter.current += 1;
+    const id = eventCounter.current;
+    setLiveEvent({ id, kind, pending: true });
+    try {
+      const result = await api("/demo/simulate-attack", { method: "POST", body: JSON.stringify({ kind }) });
+      setLiveEvent({ id, kind, alert: result?.alert || null, device: result?.device || null, habits: result?.habits || null });
+      await load();
+    } catch (err) {
+      if (err.status === 404) setDemoKnownOff(true);
+      setLiveEvent({ id, kind, error: err.status === 404 ? "Demo mode isn't enabled on this appliance." : `That didn't work: ${err.message}` });
+      throw err;
+    }
+  };
+  const playDemoStory = async () => {
+    if (demoStory.running) return;
+    setPage("Live");
+    setDemoStory({ running: true, step: 0, message: "" });
+    try {
+      for (let index = 0; index < DEMO_STORY.length; index += 1) {
+        await new Promise((done) => { storyTimer.current = setTimeout(done, STORY_DELAYS[index]); });
+        if (storyCancelled.current) return;
+        setDemoStory({ running: true, step: index + 1, message: "" });
+        await runScenario(DEMO_STORY[index]);
+      }
+      setDemoStory({ running: false, step: 0, message: "" });
+    } catch (err) {
+      setDemoStory({
+        running: false,
+        step: 0,
+        message: err.status === 404
+          ? "Demo story stopped: demo mode isn't enabled on this appliance."
+          : `Demo story stopped: ${err.message}`,
+      });
+    }
+  };
+  const demoAvailable = typeof data.status?.demo_mode === "boolean" ? data.status.demo_mode : !demoKnownOff;
+  const topbarMessage = demoStory.message || scanMessage;
+  const blocklistCount = data.status?.blocklist_domains || 0;
+  const alertCount = data.alerts?.length || 0;
+  const navigate = (next) => { setPage(next); if (next !== "Live") setLiveEvent(null); };
+  return <><div className="shell">
     <aside className="sidebar">
-      <div className="brand"><div className="radar-logo"><i/><i/><i/></div><div><strong>Home<span>Radar</span></strong><small>NETWORK DEFENSE</small></div></div>
-      <nav>{NAV.map((item) => <button className={page === item ? "active" : ""} onClick={() => setPage(item)} key={item}><Icon name={item.toLowerCase()}/><span>{item}</span>{item === "Alerts" && data.alerts?.length > 0 && <b>{data.alerts.length}</b>}</button>)}</nav>
-      <div className="appliance-status"><span><i className={connected ? "online" : ""}/>{connected ? "Appliance online" : "Reconnecting…"}</span><small>{data.status?.blocklist_domains || 0} blocked domains</small></div>
+      <div className="brand"><span className="brand-mark"><DeviceIcon name="radar" /></span><strong>Home Radar</strong></div>
+      <nav>{NAV.map((item) => <button className={[page === item.id ? "active" : "", item.secondary ? "nav-secondary" : ""].filter(Boolean).join(" ") || undefined} aria-current={page === item.id ? "page" : undefined} onClick={() => navigate(item.id)} key={item.id}><Icon name={item.icon} /><span>{item.label}</span>{item.id === "Alerts" && alertCount > 0 && <b aria-label={`${alertCount} open`}>{alertCount}</b>}</button>)}</nav>
+      <div className="appliance-status"><span><i className={connected ? "online" : ""} />{connected ? "Connected" : "Reconnecting…"}</span><small>{blocklistCount ? `Blocking ${blocklistCount.toLocaleString()} known bad domains` : "Loading blocklists…"}</small></div>
     </aside>
-    <main><header className="topbar"><span>{title}</span><div>{scanMessage && <span className={`scan-result ${scanMessage.startsWith("Scan failed") ? "danger" : ""}`}>{scanMessage}</span>}<button className="scan-mini" onClick={scan} disabled={busy}>{busy ? "Scanning…" : "Run scan"}</button><span className={`score-chip ${tone(data.status?.security_score || 100)}`}>{data.status?.security_score ?? 100}</span></div></header>
+    <main><header className="topbar">
+      <span className="topbar-brand"><span className="brand-mark"><DeviceIcon name="radar" /></span>Home Radar</span>
+      <div className="topbar-actions">
+        {demoStory.running && <span className="story-chip">Demo story · {demoStory.step}/{DEMO_STORY.length} · simulated</span>}
+        {topbarMessage && <span className={`scan-result${topbarMessage.startsWith("Scan failed") || topbarMessage.startsWith("Demo story stopped") ? " danger-text" : ""}`} role="status">{topbarMessage}</span>}
+        <button className="report-button" onClick={() => setShowReport(true)}>Report card</button>
+        <button className="scan-mini" onClick={scan} disabled={busy}><Icon name="scan" />{busy ? "Scanning…" : "Run scan"}</button>
+      </div>
+    </header>
       <div className="content">
-        {page === "Overview" && <Overview data={data} onNavigate={setPage} onSelect={setSelected} freshAlertIds={freshAlertIds}/>}
-        {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy}/>}
-        {page === "Traffic" && <Traffic traffic={data.traffic || {}}/>}
-        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} freshAlertIds={freshAlertIds}/>}
-        {page === "Settings" && <Settings onRefreshDashboard={load}/>}
+        {page === "Overview" && <Overview data={data} onNavigate={navigate} onSelect={setSelected} onOpenReport={() => setShowReport(true)} freshAlertIds={freshAlertIds} />}
+        {page === "Live" && <LiveView data={data} event={liveEvent} story={demoStory} demoAvailable={demoAvailable} onRunScenario={(kind) => runScenario(kind).catch(() => {})} onPlayStory={playDemoStory} onAct={actOnAlertDevice} onSelect={setSelected} />}
+        {page === "Devices" && <Devices devices={data.devices || []} onSelect={setSelected} onScan={scan} busy={busy} />}
+        {page === "Privacy" && <Privacy onNavigate={navigate} onOpenDevice={(id) => { const match = (data.devices || []).find((device) => device.id === id); if (match) setSelected(match); }} />}
+        {page === "Traffic" && <Traffic traffic={data.traffic || {}} />}
+        {page === "Alerts" && <Alerts alerts={data.alerts || []} onResolve={resolve} onAlertAction={actOnAlertDevice} freshAlertIds={freshAlertIds} />}
+        {page === "Settings" && <Settings onRefreshDashboard={load} onPlayDemoStory={playDemoStory} demoStory={demoStory} />}
       </div>
     </main>
-    <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }}/>
-    {!setupComplete && <SetupWizard onComplete={()=>setSetupComplete(true)}/>}
-  </div>;
+    <DeviceDrawer device={selected} onClose={() => setSelected(null)} onUpdate={(updated) => { setSelected(updated); load(); }} />
+    {!setupComplete && <SetupWizard onComplete={() => setSetupComplete(true)} />}
+  </div>
+  {showReport && <ReportCard data={{ ...data, alerts: data.alerts || [] }} onClose={() => setShowReport(false)} />}
+  </>;
 }

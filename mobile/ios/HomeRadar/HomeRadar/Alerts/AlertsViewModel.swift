@@ -31,6 +31,7 @@ final class AlertsViewModel: ObservableObject {
                 alerts.removeAll { $0.id == alertID }
             }
         } catch {
+            session.handle(error)
             errorMessage = "Couldn't resolve that alert. Try again."
         }
     }

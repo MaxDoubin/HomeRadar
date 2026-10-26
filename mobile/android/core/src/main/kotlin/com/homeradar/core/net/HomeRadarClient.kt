@@ -21,8 +21,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
+import java.util.concurrent.TimeUnit
 
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+/** POST /scan runs synchronously across the whole subnet; OkHttp's 10s default is too short. */
+const val SCAN_READ_TIMEOUT_SECONDS: Long = 60
 
 /**
  * Thin REST client for the HomeRadar appliance's FastAPI backend. Every
@@ -36,6 +40,10 @@ class HomeRadarClient(
     private val httpClient: OkHttpClient = OkHttpClient(),
 ) {
     private fun url(path: String): String = baseUrl.trimEnd('/') + path
+
+    internal val scanHttpClient: OkHttpClient by lazy {
+        httpClient.newBuilder().readTimeout(SCAN_READ_TIMEOUT_SECONDS, TimeUnit.SECONDS).build()
+    }
 
     /** The single attach-point for auth on every outgoing request. */
     private fun Request.Builder.attachAuth(): Request.Builder {
@@ -55,11 +63,11 @@ class HomeRadarClient(
             .attachAuth()
             .build()
 
-    private suspend fun execute(request: Request): Response =
-        withContext(Dispatchers.IO) { httpClient.newCall(request).execute() }
+    private suspend fun execute(request: Request, client: OkHttpClient = httpClient): Response =
+        withContext(Dispatchers.IO) { client.newCall(request).execute() }
 
-    private suspend fun executeForBody(request: Request): String {
-        execute(request).use { response ->
+    private suspend fun executeForBody(request: Request, client: OkHttpClient = httpClient): String {
+        execute(request, client).use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw HomeRadarApiException(response.code, body)
@@ -144,7 +152,7 @@ class HomeRadarClient(
             .post(body)
             .attachAuth()
             .build()
-        return HomeRadarJson.parseToJsonElement(executeForBody(request))
+        return HomeRadarJson.parseToJsonElement(executeForBody(request, scanHttpClient))
     }
 
     suspend fun claimPairingCode(code: String): PairClaimResult {
@@ -173,3 +181,7 @@ private fun Any?.toJsonPrimitiveOrNull(): JsonElement = when (this) {
 /** Thrown when the appliance returns a non-2xx response. */
 class HomeRadarApiException(val code: Int, val bodyText: String) :
     Exception("HomeRadar API error $code: $bodyText")
+
+/** True when the appliance rejected this phone's pairing token (it was revoked or never valid). */
+val Throwable.isUnauthorized: Boolean
+    get() = this is HomeRadarApiException && code == 401

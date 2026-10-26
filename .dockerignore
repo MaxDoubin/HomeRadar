@@ -1,0 +1,23 @@
+# Only backend/, kiosk/, frontend/ and docker/entrypoint.sh are copied into the image.
+.git
+.github
+.claude
+**/node_modules
+**/__pycache__
+**/*.pyc
+.venv
+venv
+.env
+.env.*
+*.log
+*.db
+frontend/dist
+desktop
+mobile
+iso
+tests
+docs
+deploy
+scripts
+render.yaml
+README.md

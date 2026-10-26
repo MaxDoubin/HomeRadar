@@ -77,7 +77,9 @@ async function waitForBackend(port, timeoutMilliseconds = 120000) {
     }
     await delay(250);
   }
-  throw new Error("The Home Radar backend did not become ready within 45 seconds.");
+  throw new Error(
+    `The Home Radar backend did not become ready within ${Math.round(timeoutMilliseconds / 1000)} seconds.`,
+  );
 }
 
 function getBackendExecutablePath() {
@@ -140,6 +142,8 @@ async function startBackend() {
     HOMERADAR_BACKUP_DIR: path.join(dataDirectory, "backups"),
     HOMERADAR_DNS_ENABLED: "false",
     HOMERADAR_TRAFFIC_MONITOR_ENABLED: "false",
+    // A desktop copy isn't a LAN appliance; phones shouldn't discover it.
+    HOMERADAR_MDNS_ADVERTISE: "false",
     HOMERADAR_BLOCKLIST_AUTO_UPDATE: "true",
     PYTHONUNBUFFERED: "1",
   };
@@ -192,7 +196,7 @@ async function createWindow() {
     minWidth: 940,
     minHeight: 650,
     title: "Home Radar",
-    backgroundColor: "#020806",
+    backgroundColor: "#f6f5f1",
     show: false,
     webPreferences: {
       nodeIntegration: false,

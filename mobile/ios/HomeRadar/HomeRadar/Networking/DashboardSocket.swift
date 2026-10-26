@@ -18,8 +18,13 @@ enum DashboardSocketState: Equatable {
 /// exponential backoff. Credentials are sent in the upgrade request header,
 /// never in the URL.
 final class DashboardSocket {
+    /// Close code the appliance sends when the pairing token is missing or revoked.
+    static let tokenRejectedCloseCode = 4401
+
     var onSnapshot: ((SnapshotMessage) -> Void)?
     var onStateChange: ((DashboardSocketState) -> Void)?
+    /// Called (instead of retrying) once the appliance has rejected this phone's token.
+    var onUnauthorized: (() -> Void)?
 
     private let client: HomeRadarClient
     private let session: URLSession
@@ -80,10 +85,30 @@ final class DashboardSocket {
                 } catch {
                     if Task.isCancelled || self.isStopped { return }
                     self.onStateChange?(.disconnected)
+                    if await self.tokenWasRejected(by: task) {
+                        self.isStopped = true
+                        self.onUnauthorized?()
+                        return
+                    }
                     self.scheduleRetry()
                     return
                 }
             }
+        }
+    }
+
+    private func tokenWasRejected(by task: URLSessionWebSocketTask) async -> Bool {
+        if task.closeCode.rawValue == Self.tokenRejectedCloseCode { return true }
+        guard let http = task.response as? HTTPURLResponse else { return false }
+        if http.statusCode == 401 { return true }
+        // The appliance rejects a bad token by closing before the upgrade completes,
+        // which surfaces as HTTP 403 -- confirm over REST before unpairing.
+        guard http.statusCode == 403 else { return false }
+        do {
+            _ = try await client.devices()
+            return false
+        } catch {
+            return error.isUnauthorized
         }
     }
 

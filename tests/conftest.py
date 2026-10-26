@@ -14,6 +14,14 @@ import pytest
 from backend.db import models as models_mod
 
 
+@pytest.fixture(autouse=True)
+def _no_mdns_advertisement(monkeypatch):
+    """Never announce a real mDNS service from the test suite."""
+    from backend import config
+
+    monkeypatch.setattr(config, "MDNS_ADVERTISE", False)
+
+
 @pytest.fixture
 def db_path(tmp_path):
     path = str(tmp_path / "homeradar-test.db")

@@ -24,7 +24,8 @@ services:
         value: "Home Radar Demo"
       - key: HOMERADAR_DNS_ENABLED
         value: "false"
-    disk:
-      name: homeradar-demo-data
-      mountPath: /data
-      sizeGB: 1
+      # Render routes traffic to $PORT; the image's server listens on 8000.
+      - key: PORT
+        value: "8000"
+    # No persistent disk: Render's free plan doesn't support one. Demo data lives
+    # in the container's /data and resets whenever the free instance restarts.

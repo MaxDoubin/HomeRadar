@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import socket
 import threading
 from contextlib import asynccontextmanager
 
@@ -12,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import config, pairing, services
 from backend.api.routes import router as api_router
+from backend.api.insights_routes import router as insights_router
 from backend.api.websocket import router as websocket_router
 from backend.db import get_conn, init_db, models
 from backend.discovery.scan_runner import run_discovery_scan
@@ -97,6 +100,53 @@ def _prepare_first_run_pairing() -> None:
     logger.warning("=" * 72)
 
 
+def _lan_ipv4() -> str | None:
+    # A UDP connect does a routing lookup without sending anything.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect(("192.0.2.1", 9))
+        address = probe.getsockname()[0]
+    return None if address.startswith("127.") else address
+
+
+def _start_mdns_advertisement():
+    """Advertise `_http._tcp` as "HomeRadar on <host>" so the phone apps can find this appliance."""
+    try:
+        from zeroconf import ServiceInfo, Zeroconf
+
+        address = _lan_ipv4()
+        if address is None:
+            logger.info("mDNS advertisement skipped: no LAN address")
+            return None
+        hostname = socket.gethostname().split(".")[0] or "appliance"
+        info = ServiceInfo(
+            "_http._tcp.local.",
+            f"HomeRadar on {hostname}._http._tcp.local.",
+            addresses=[socket.inet_aton(address)],
+            port=config.API_PORT,
+            properties={"path": "/", "app": "homeradar"},
+            server=f"{hostname}.local.",
+        )
+        zeroconf = Zeroconf()
+        try:
+            zeroconf.register_service(info, allow_name_change=True)
+        except Exception:
+            zeroconf.close()
+            raise
+        logger.info("Advertising Home Radar over mDNS at %s:%s", address, config.API_PORT)
+        return zeroconf, info
+    except Exception:
+        logger.warning("mDNS advertisement unavailable; phone apps can still connect by IP address", exc_info=True)
+        return None
+
+
+def _stop_mdns_advertisement(advertisement) -> None:
+    zeroconf, info = advertisement
+    with contextlib.suppress(Exception):
+        zeroconf.unregister_service(info)
+    with contextlib.suppress(Exception):
+        zeroconf.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -128,9 +178,12 @@ async def lifespan(app: FastAPI):
             name="homeradar-traffic",
         )
         traffic_thread.start()
+    mdns = await asyncio.to_thread(_start_mdns_advertisement) if config.MDNS_ADVERTISE else None
     try:
         yield
     finally:
+        if mdns:
+            await asyncio.to_thread(_stop_mdns_advertisement, mdns)
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -165,6 +218,7 @@ app.add_middleware(
 app.add_middleware(ApplianceSecurityMiddleware)
 
 app.include_router(api_router)
+app.include_router(insights_router)
 app.include_router(websocket_router)
 
 kiosk_dir = config.BASE_DIR / "kiosk"

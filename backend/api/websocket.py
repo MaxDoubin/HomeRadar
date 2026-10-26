@@ -5,6 +5,7 @@ import asyncio
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend import config, services
 from backend.db import get_conn, models
 from backend.monitor.trust_scoring import household_score
 from backend.pairing import verify_token
@@ -25,6 +26,10 @@ def dashboard_snapshot() -> dict:
             "device_count": len(devices),
             "open_alert_count": len(alerts),
             "security_score": score["score"],
+            # The dashboard merges snapshots over its /dashboard payload, so any
+            # status field missing here would be wiped on the first tick.
+            "dns_enabled": config.DNS_ENABLED,
+            "blocklist_domains": services.blocklists.count,
         },
         "devices": devices,
         "alerts": alerts[:25],
@@ -55,7 +60,11 @@ def _token_is_valid(token: str | None) -> bool:
 
 @router.websocket("/ws")
 async def dashboard_websocket(websocket: WebSocket):
-    local = is_local_host(websocket.client.host if websocket.client else None)
+    # Public-demo visitors get the same access as the appliance's own screen;
+    # see the demo-mode note in backend/security.py.
+    local = config.DEMO_MODE_ENABLED or is_local_host(
+        websocket.client.host if websocket.client else None
+    )
     token = _websocket_token(websocket)
     token_valid = _token_is_valid(token)
 

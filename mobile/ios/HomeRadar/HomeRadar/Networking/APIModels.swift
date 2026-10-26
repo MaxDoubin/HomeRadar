@@ -212,14 +212,12 @@ struct SettingsUpdateRequest: Encodable {
     var digestEmail: String?
     var dnsUpstream: String?
     var notificationsEnabled: Bool?
-    var dnsEnabled: Bool?
 
     enum CodingKeys: String, CodingKey {
         case householdName = "household_name"
         case digestEmail = "digest_email"
         case dnsUpstream = "dns_upstream"
         case notificationsEnabled = "notifications_enabled"
-        case dnsEnabled = "dns_enabled"
     }
 }
 

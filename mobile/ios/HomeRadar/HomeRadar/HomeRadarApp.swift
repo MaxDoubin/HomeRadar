@@ -46,6 +46,8 @@ final class AppSession: ObservableObject {
     @Published private(set) var isConnected: Bool
     @Published private(set) var dashboardState: DashboardState = .empty
     @Published private(set) var socketState: DashboardSocketState = .disconnected
+    /// Shown on the Connect screen after the appliance revoked this phone's token.
+    @Published private(set) var pairingNotice: String?
 
     let connectionStore: ConnectionStore
     let client: HomeRadarClient
@@ -72,6 +74,12 @@ final class AppSession: ObservableObject {
                 self.socketState = state
             }
         }
+        socket.onUnauthorized = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.handleUnpaired()
+            }
+        }
     }
 
     private func apply(snapshot: SnapshotMessage) {
@@ -91,12 +99,30 @@ final class AppSession: ObservableObject {
         connectionStore.save(address: address, token: token)
         client.baseAddress = address
         client.token = token
+        pairingNotice = nil
         isConnected = true
+    }
+
+    /// Route REST failures here: a 401 means the appliance unpaired this phone.
+    func handle(_ error: Error) {
+        if error.isUnauthorized { handleUnpaired() }
+    }
+
+    /// The appliance revoked this phone's token: back to pairing, keeping the address.
+    func handleUnpaired() {
+        socket.stop()
+        connectionStore.clearToken()
+        client.token = nil
+        dashboardState = .empty
+        socketState = .disconnected
+        pairingNotice = "This phone was unpaired from Home Radar. Pair again to keep getting alerts."
+        isConnected = false
     }
 
     /// Forgets the saved appliance connection entirely (Settings ->
     /// "Forget This Appliance"), dropping back to the Connect flow.
     func disconnect() {
+        pairingNotice = nil
         socket.stop()
         connectionStore.clear()
         client.baseAddress = ""

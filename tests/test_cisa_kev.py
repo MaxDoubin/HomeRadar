@@ -60,7 +60,7 @@ def test_update_catalog_inserts_records_and_is_searchable(monkeypatch, patched_d
     }
     monkeypatch.setattr(
         "backend.monitor.cisa_kev.urllib.request.urlopen",
-        lambda request, timeout=None: _FakeJSONResponse(payload),
+        lambda request, timeout=None, context=None: _FakeJSONResponse(payload),
     )
 
     with models.get_conn(db_path) as conn:
@@ -91,7 +91,7 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
     }
     monkeypatch.setattr(
         "backend.monitor.cisa_kev.urllib.request.urlopen",
-        lambda request, timeout=None: _FakeJSONResponse(first_payload),
+        lambda request, timeout=None, context=None: _FakeJSONResponse(first_payload),
     )
     with models.get_conn(db_path) as conn:
         update_catalog(conn, url="https://kev.example/feed.json")
@@ -112,7 +112,7 @@ def test_update_catalog_updates_existing_record_in_place_on_conflict(monkeypatch
     }
     monkeypatch.setattr(
         "backend.monitor.cisa_kev.urllib.request.urlopen",
-        lambda request, timeout=None: _FakeJSONResponse(second_payload),
+        lambda request, timeout=None, context=None: _FakeJSONResponse(second_payload),
     )
     with models.get_conn(db_path) as conn:
         count = update_catalog(conn, url="https://kev.example/feed.json")
@@ -166,3 +166,19 @@ def test_search_catalog_filters_by_query_and_clamps_limit(patched_db, db_path):
 
         clamped_high = search_catalog(conn, limit=100_000)
         assert len(clamped_high) == 3
+
+
+def test_update_catalog_verifies_tls_with_certifi_bundle(monkeypatch, db_path):
+    import ssl
+
+    seen = {}
+
+    def fake_urlopen(request, timeout=None, context=None):
+        seen["context"] = context
+        return _FakeJSONResponse({"vulnerabilities": []})
+
+    monkeypatch.setattr("backend.monitor.cisa_kev.urllib.request.urlopen", fake_urlopen)
+    with models.get_conn(db_path) as conn:
+        update_catalog(conn, url="https://kev.example/feed.json")
+    assert isinstance(seen["context"], ssl.SSLContext)
+    assert seen["context"].verify_mode == ssl.CERT_REQUIRED

@@ -1,6 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 // vi.hoisted() gives us mock fns that exist before vi.mock's factory (which is hoisted
@@ -162,7 +162,7 @@ afterEach(() => {
 
 async function renderApp() {
   const utils = render(<App />);
-  await screen.findByRole("heading", { name: /your network at a glance/i });
+  await screen.findByTestId("overview");
   return utils;
 }
 
@@ -177,7 +177,7 @@ describe("App navigation", () => {
 
     await user.click(within(nav).getByRole("button", { name: /devices/i }));
     await screen.findByRole("button", { name: /^scan network$/i });
-    expect(screen.queryByRole("heading", { name: /your network at a glance/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview")).not.toBeInTheDocument();
 
     await user.click(within(nav).getByRole("button", { name: /traffic/i }));
     await screen.findByRole("heading", { name: /^traffic$/i });
@@ -533,6 +533,163 @@ describe("Settings simulate-attack panel", () => {
   });
 });
 
+// ---- Household grade, plain-English alerts, report card, demo story -------
+
+const alertNewDevice = {
+  id: 103,
+  device_id: devicePending.id,
+  title: "New device connected",
+  description: "Espressif joined the network. (Simulated for demonstration.)",
+  severity: "warning",
+  is_resolved: 0,
+  created_at: new Date().toISOString(),
+};
+
+function withDashboard(overrides) {
+  mocks.api.mockImplementation((path, options = {}) => {
+    if (path === "/dashboard") return Promise.resolve({ ...clone(dashboardFixture), ...clone(overrides) });
+    return defaultApiImpl(path, options);
+  });
+}
+
+describe("Household letter grade", () => {
+  it("shows a letter grade and the protection summary on Overview", async () => {
+    await renderApp();
+    expect(await screen.findByTestId("household-grade")).toHaveTextContent("B+");
+    expect(screen.getByText(/solid, with a few things worth reviewing/i)).toBeInTheDocument();
+    const strip = screen.getByLabelText(/protection summary/i);
+    expect(strip).toHaveTextContent(/2\s*devices protected/i);
+    expect(strip).toHaveTextContent(/5\s*threats blocked today/i);
+    expect(strip).toHaveTextContent(/\$0\s*a month/i);
+  });
+});
+
+describe("Plain-English alerts", () => {
+  async function openAlerts() {
+    withDashboard({ alerts: [alertNewDevice, alertOpen2] });
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /alerts/i }));
+    const card = (await screen.findByRole("heading", { name: alertNewDevice.title })).closest(".alert-card");
+    return { user, card };
+  }
+
+  it("explains what the alert means, what to do, and labels simulated alerts", async () => {
+    const { card } = await openAlerts();
+    expect(within(card).getByText(/what this means/i)).toBeInTheDocument();
+    expect(within(card).getByText(/hasn't approved/i)).toBeInTheDocument();
+    expect(within(card).getByText(/what to do/i)).toBeInTheDocument();
+    expect(within(card).getByText(/^simulated$/i)).toBeInTheDocument();
+  });
+
+  it("blocks the device in one tap, then resolves the alert and refreshes", async () => {
+    const { user, card } = await openAlerts();
+    const dashboardCallsBefore = mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length;
+    await user.click(within(card).getByRole("button", { name: /block this device/i }));
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === `/devices/${devicePending.id}/authorization`);
+      expect(auth).toBeTruthy();
+      expect(auth[1].method).toBe("PATCH");
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 2 });
+      const resolveCall = mocks.api.mock.calls.find((c) => c[0] === `/alerts/${alertNewDevice.id}`);
+      expect(JSON.parse(resolveCall[1].body)).toEqual({ resolved: true });
+    });
+    await waitFor(() => {
+      expect(mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length).toBeGreaterThan(dashboardCallsBefore);
+    });
+  });
+
+  it("trusts the device when the family recognizes it", async () => {
+    const { user, card } = await openAlerts();
+    await user.click(within(card).getByRole("button", { name: /it's mine/i }));
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === `/devices/${devicePending.id}/authorization`);
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 1 });
+    });
+  });
+
+  it("does not offer device actions for alerts without a device", async () => {
+    await openAlerts();
+    const other = screen.getByRole("heading", { name: alertOpen2.title }).closest(".alert-card");
+    expect(within(other).queryByRole("button", { name: /block this device/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("Home Security Report Card", () => {
+  it("opens a printable report with the grade, alerts, steps, and devices", async () => {
+    const print = vi.spyOn(window, "print").mockImplementation(() => {});
+    withDashboard({ alerts: [alertNewDevice] });
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^report card$/i }));
+
+    const report = await screen.findByRole("dialog", { name: /test home/i });
+    expect(within(report).getByText("B+")).toBeInTheDocument();
+    expect(within(report).getByText(/new device connected \(simulated\)/i)).toBeInTheDocument();
+    expect(within(report).getByText(/review 1 new device/i)).toBeInTheDocument();
+    expect(within(report).getByText("kitchen-echo")).toBeInTheDocument();
+
+    await user.click(within(report).getByRole("button", { name: /print \/ save as pdf/i }));
+    expect(print).toHaveBeenCalled();
+
+    await user.click(within(report).getByRole("button", { name: /^close$/i }));
+    expect(screen.queryByRole("dialog", { name: /test home/i })).not.toBeInTheDocument();
+    print.mockRestore();
+  });
+});
+
+describe("Demo story", () => {
+  afterEach(() => vi.useRealTimers());
+
+  async function openDemoPanel() {
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /settings/i }));
+    return screen.findByRole("button", { name: /play demo story/i });
+  }
+
+  const storyCalls = () => mocks.api.mock.calls
+    .filter((c) => c[0] === "/demo/simulate-attack")
+    .map((c) => JSON.parse(c[1].body).kind);
+
+  it("opens Live view and fires new_device, malicious_dns, then deauth a few seconds apart", async () => {
+    const button = await openDemoPanel();
+    vi.useFakeTimers();
+    fireEvent.click(button);
+
+    expect(screen.getByTestId("live-view")).toBeInTheDocument();
+    expect(storyCalls()).toEqual([]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
+    expect(storyCalls()).toEqual(["new_device"]);
+    expect(screen.getByText(/demo story · 1\/3 · simulated/i)).toBeInTheDocument();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(storyCalls()).toEqual(["new_device", "malicious_dns"]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+    expect(storyCalls()).toEqual(["new_device", "malicious_dns", "deauth"]);
+    expect(screen.queryByText(/demo story ·/i)).not.toBeInTheDocument();
+  });
+
+  it("stops and explains why when demo mode is off", async () => {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/demo/simulate-attack") {
+        const error = new Error("Not found");
+        error.status = 404;
+        return Promise.reject(error);
+      }
+      return defaultApiImpl(path, options);
+    });
+    const button = await openDemoPanel();
+    vi.useFakeTimers();
+    fireEvent.click(button);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
+    expect(storyCalls()).toEqual(["new_device"]);
+    expect(screen.getByText(/demo story stopped: demo mode isn't enabled/i)).toBeInTheDocument();
+  });
+});
+
 // ---- Per-device bandwidth sparkline ----------------------------------------
 
 describe("Devices bandwidth sparkline", () => {
@@ -567,5 +724,336 @@ describe("Devices bandwidth sparkline", () => {
     const panel = container.querySelector(".devices-panel.full");
     await waitFor(() => expect(panel.querySelector(".sparkline")).toBeTruthy());
     expect(within(panel).getByText(/no traffic/i)).toBeInTheDocument();
+  });
+});
+
+// ---- Live view: staged "watch it catch an intruder" demo -------------------
+
+describe("Live view", () => {
+  const intruder = {
+    id: 9,
+    hostname: null,
+    vendor: "Espressif",
+    model: null,
+    ip: "192.168.1.77",
+    mac: "24:0A:C4:12:34:56",
+    device_type: "iot_device",
+    is_authorized: 0,
+    trust_score: 35,
+    first_seen: new Date().toISOString(),
+    last_seen: new Date().toISOString(),
+    fingerprint_confidence: 0.62,
+  };
+  const intruderAlert = {
+    id: 201,
+    device_id: intruder.id,
+    title: "New device connected",
+    description: "Espressif joined the network. (Simulated for demonstration.)",
+    severity: "warning",
+    is_resolved: 0,
+    created_at: new Date().toISOString(),
+  };
+
+  function mockLive({ demoOff = false } = {}) {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/demo/simulate-attack") {
+        if (demoOff) {
+          const error = new Error("Not found");
+          error.status = 404;
+          return Promise.reject(error);
+        }
+        const { kind } = JSON.parse(options.body);
+        if (kind === "malicious_dns") {
+          return Promise.resolve({ kind, alert_id: 202, device: clone(intruder), alert: { ...intruderAlert, id: 202, severity: "critical", title: "Suspicious connection: 203.0.113.9" } });
+        }
+        return Promise.resolve({ kind, alert_id: 201, alert: clone(intruderAlert), device: clone(intruder) });
+      }
+      if (path === "/devices/9/trust") return Promise.resolve({ score: 35, reasons: ["Not approved by the household yet"] });
+      return defaultApiImpl(path, options);
+    });
+  }
+
+  async function openLive() {
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /live view/i }));
+    await screen.findByTestId("live-view");
+    return user;
+  }
+
+  const kinds = () => mocks.api.mock.calls.filter((c) => c[0] === "/demo/simulate-attack").map((c) => JSON.parse(c[1].body).kind);
+
+  it("fires the scenario's kind and investigates the device the backend returned", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /unknown device joins/i }));
+    expect(kinds()).toEqual(["new_device"]);
+
+    const panel = await screen.findByText(/investigating new device|investigation complete/i);
+    const investigation = panel.closest(".investigation");
+    expect(within(investigation).getByText(/24:0A:C4:12:34:56/)).toBeInTheDocument();
+    await waitFor(() => expect(within(investigation).getByText("Espressif")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(within(investigation).getByText("35 / 100")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/demo: simulated events/i)).toBeInTheDocument();
+  });
+
+  it("blocks the investigated device through the authorization API", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /unknown device joins/i }));
+    const block = await screen.findByRole("button", { name: /block this device/i }, { timeout: 6000 });
+    await user.click(block);
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === "/devices/9/authorization");
+      expect(auth).toBeTruthy();
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 2 });
+      const resolveCall = mocks.api.mock.calls.find((c) => c[0] === "/alerts/201");
+      expect(JSON.parse(resolveCall[1].body)).toEqual({ resolved: true });
+    });
+  });
+
+  it("shows the blocked destination from the real alert for the malware scenario", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /malware connection/i }));
+    expect(kinds()).toEqual(["malicious_dns"]);
+    expect(await screen.findByRole("heading", { name: /blocked 203\.0\.113\.9/i })).toBeInTheDocument();
+  });
+
+  it("hides the scenarios and explains why when demo mode is off", async () => {
+    mockLive({ demoOff: true });
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /wi-fi attack/i }));
+    expect(await screen.findByText(/demo mode isn't enabled/i)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /demo scenarios/i })).not.toBeInTheDocument();
+  });
+});
+
+// ---- household checks: privacy, bedtime, vulnerabilities -------------------
+
+const privacyReport = {
+  hours: 24,
+  devices: [{
+    device_id: 1, name: "Living room TV", vendor: "Samsung", device_type: "smart_tv",
+    dns_queries: 200, tracker_requests: 80, blocked_requests: 30,
+    companies: [{ company: "Samsung Ads", category: "Advertising", requests: 50, blocked: 20 }, { company: "Google", category: "Analytics", requests: 30, blocked: 10 }],
+  }],
+  top_companies: [
+    { company: "Samsung Ads", category: "Advertising", requests: 50, blocked: 20, devices: 1 },
+    { company: "Google", category: "Analytics", requests: 30, blocked: 10, devices: 1 },
+  ],
+  totals: { dns_queries: 200, tracker_requests: 80, blocked_requests: 30, companies: 2, devices_tracked: 1 },
+};
+
+const netgearMatch = {
+  device_id: 1, name: "kitchen-echo", vendor: "NETGEAR", brand: "NETGEAR", status: "catalog_matches", kev_count: 2,
+  recent: [{ cve_id: "CVE-2017-5521", product: "Multiple Devices", vulnerability_name: "NETGEAR Multiple Devices Exposure of Sensitive Information Vulnerability", date_added: "2022-09-08", known_ransomware_use: false }],
+  advice: "CISA lists 2 actively exploited vulnerabilities in products from NETGEAR. That doesn't mean this device is affected, but make sure its software is up to date.",
+};
+
+function withHousehold(routes) {
+  mocks.api.mockImplementation((path, options = {}) => {
+    for (const [pattern, handler] of routes) {
+      if (typeof pattern === "string" ? path === pattern : pattern.test(path)) {
+        return typeof handler === "function" ? handler(path, options) : Promise.resolve(clone(handler));
+      }
+    }
+    return defaultApiImpl(path, options);
+  });
+}
+
+async function openPrivacy(user) {
+  await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /privacy/i }));
+  return screen.findByTestId("privacy-page");
+}
+
+describe("Privacy page", () => {
+  it("shows the top tracking companies and a per-device breakdown", async () => {
+    withHousehold([[/^\/privacy\/report/, privacyReport]]);
+    await renderApp();
+    const user = userEvent.setup();
+    const page = await openPrivacy(user);
+    expect(await within(page).findByRole("heading", { name: /who's tracking you/i })).toBeInTheDocument();
+    expect(within(page).getAllByText("Samsung Ads").length).toBeGreaterThan(0);
+    expect(within(page).getByText(/80 of 200 lookups \(40%\) went to trackers/i)).toBeInTheDocument();
+    expect(within(page).getByText("blocked by Home Radar")).toBeInTheDocument();
+  });
+
+  it("asks for a different period when switching to 7 days", async () => {
+    withHousehold([[/^\/privacy\/report/, privacyReport]]);
+    await renderApp();
+    const user = userEvent.setup();
+    await openPrivacy(user);
+    await user.click(screen.getByRole("button", { name: /last 7 days/i }));
+    await waitFor(() => expect(mocks.api.mock.calls.some((c) => c[0] === "/privacy/report?hours=168")).toBe(true));
+  });
+
+  it("shows an honest empty state before any DNS data exists", async () => {
+    withHousehold([[/^\/privacy\/report/, { hours: 24, devices: [], top_companies: [], totals: { dns_queries: 0, tracker_requests: 0, blocked_requests: 0, companies: 0 } }]]);
+    await renderApp();
+    const user = userEvent.setup();
+    const page = await openPrivacy(user);
+    expect(await within(page).findByText(/nothing to report yet/i)).toBeInTheDocument();
+  });
+
+  it("explains a failure and retries", async () => {
+    let calls = 0;
+    withHousehold([[/^\/privacy\/report/, () => { calls += 1; return calls === 1 ? Promise.reject(new Error("down")) : Promise.resolve(clone(privacyReport)); }]]);
+    await renderApp();
+    const user = userEvent.setup();
+    const page = await openPrivacy(user);
+    expect(await within(page).findByText(/couldn't load the report/i)).toBeInTheDocument();
+    await user.click(within(page).getByRole("button", { name: /try again/i }));
+    expect(await within(page).findByText(/80 of 200 lookups/i)).toBeInTheDocument();
+  });
+});
+
+describe("Bedtime", () => {
+  async function openDrawer(user, name = "unknown-iot") {
+    const panel = (await screen.findByTestId("overview")).querySelector(".devices-panel");
+    await user.click(within(panel).getByText(name));
+    return screen.findByTestId("device-bedtime");
+  }
+
+  it("lists devices with a bedtime on Home", async () => {
+    withHousehold([["/bedtime", { timezone: "America/Los_Angeles", devices: [{ device_id: 2, name: "Kids' tablet", block_start: "21:00", block_end: "07:00", internet_enabled: true, active_now: true, next_change_at: null, schedule_valid: true, summary: "Offline until 7:00 AM" }] }]]);
+    await renderApp();
+    const card = await screen.findByTestId("bedtime-card");
+    expect(await within(card).findByText("Kids' tablet")).toBeInTheDocument();
+    expect(within(card).getByText("Offline until 7:00 AM")).toBeInTheDocument();
+    expect(within(card).getByText(/every night, 9:00 PM to 7:00 AM/i)).toBeInTheDocument();
+    expect(within(card).getByText(/offline now/i)).toBeInTheDocument();
+  });
+
+  it("shows an empty state when nothing has a bedtime", async () => {
+    withHousehold([["/bedtime", { devices: [] }]]);
+    await renderApp();
+    expect(await within(await screen.findByTestId("bedtime-card")).findByText(/no bedtimes yet/i)).toBeInTheDocument();
+  });
+
+  it("saves the 9 PM to 7 AM preset through the device policy API", async () => {
+    await renderApp();
+    const user = userEvent.setup();
+    const section = await openDrawer(user);
+    await user.click(within(section).getByRole("button", { name: /9 pm to 7 am/i }));
+    await user.click(within(section).getByRole("button", { name: /save bedtime/i }));
+    await waitFor(() => {
+      const put = mocks.api.mock.calls.find((c) => c[0] === `/devices/${devicePending.id}/policy` && c[1]?.method === "PUT");
+      expect(put).toBeTruthy();
+      expect(JSON.parse(put[1].body)).toMatchObject({ block_start: "21:00", block_end: "07:00" });
+    });
+    expect(await within(section).findByText(/bedtime saved: 9:00 PM to 7:00 AM/i)).toBeInTheDocument();
+  });
+
+  it("shows the server's message when a bedtime is rejected", async () => {
+    withHousehold([[/^\/devices\/\d+\/policy$/, (path, options) => {
+      if (options.method === "PUT") {
+        const error = new Error("Use a 24-hour time like 21:00.");
+        error.status = 422;
+        error.fields = { block_start: "Use a 24-hour time like 21:00." };
+        return Promise.reject(error);
+      }
+      return Promise.resolve({ internet_enabled: true, block_start: null, block_end: null, blocked_domains: [] });
+    }]]);
+    await renderApp();
+    const user = userEvent.setup();
+    const section = await openDrawer(user);
+    await user.click(within(section).getByRole("button", { name: /9 pm to 7 am/i }));
+    await user.click(within(section).getByRole("button", { name: /save bedtime/i }));
+    expect(await within(section).findByText(/use a 24-hour time like 21:00/i)).toBeInTheDocument();
+  });
+});
+
+describe("Vulnerability checks", () => {
+  it("offers to download the catalog when it is empty", async () => {
+    let updated = false;
+    withHousehold([
+      ["/vulnerabilities", () => Promise.resolve(updated
+        ? { status: "ok", catalog_size: 1756, catalog_updated_at: "2026-10-20T00:00:00", catalog_is_sample: false, devices_with_matches: 0, devices: [] }
+        : { status: "catalog_empty", message: "The CISA catalog hasn't been downloaded yet. Update it from Settings to check your devices.", catalog_size: 0, devices: [] })],
+      ["/threat-intel/cisa-kev/update", () => { updated = true; return Promise.resolve({ records: 1756 }); }],
+    ]);
+    await renderApp();
+    const card = await screen.findByTestId("security-checks");
+    expect(await within(card).findByText(/hasn't been downloaded yet/i)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(within(card).getByRole("button", { name: /update catalog/i }));
+    expect(await within(card).findByText(/1,756 actively exploited vulnerabilities/i)).toBeInTheDocument();
+  });
+
+  it("phrases matches as affecting a maker's products, never as this device being vulnerable", async () => {
+    withHousehold([
+      ["/vulnerabilities", { status: "ok", catalog_size: 1756, catalog_updated_at: null, catalog_is_sample: false, devices_with_matches: 1, devices: [netgearMatch] }],
+      [/^\/devices\/\d+\/vulnerabilities$/, { status: "ok", catalog_size: 1756, device: netgearMatch }],
+    ]);
+    await renderApp();
+    const card = await screen.findByTestId("security-checks");
+    expect(await within(card).findByText(/2 known exploited vulnerabilities affect products from NETGEAR/i)).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    const panel = screen.getByTestId("overview").querySelector(".devices-panel");
+    await user.click(within(panel).getByText("kitchen-echo"));
+    const section = await screen.findByTestId("device-vulnerabilities");
+    expect(await within(section).findByText(/affect products from NETGEAR/i)).toBeInTheDocument();
+    expect(within(section).getByText(/doesn't mean this device is affected/i)).toBeInTheDocument();
+    expect(within(section).getByText("CVE-2017-5521")).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/your device is vulnerable/i);
+  });
+});
+
+describe("Settings validation and demo household", () => {
+  async function openSettings(user) {
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /settings/i }));
+    return screen.findByRole("heading", { name: /^settings$/i });
+  }
+
+  it("shows the server's message next to the field it applies to", async () => {
+    withHousehold([["/settings", (path, options) => {
+      if (options.method === "PATCH") {
+        const error = new Error("Enter a valid email address.");
+        error.status = 422;
+        error.fields = { digest_email: "Enter a valid email address." };
+        return Promise.reject(error);
+      }
+      return Promise.resolve(clone(settingsFixture));
+    }]]);
+    await renderApp();
+    const user = userEvent.setup();
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: /save settings/i }));
+    expect(await screen.findByText("Enter a valid email address.")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/fix the highlighted fields/i);
+  });
+
+  it("loads labeled sample household activity in demo mode", async () => {
+    withHousehold([["/demo/household-activity", { simulated: true, devices: [{ device_id: 7, name: "Living room TV" }, { device_id: 8, name: "Kids' tablet" }], dns_queries: 740, tracker_requests: 325, bedtime: { device_id: 8, block_start: "21:00", block_end: "07:00" }, kev_sample_added: 8 }]]);
+    await renderApp();
+    const user = userEvent.setup();
+    await openSettings(user);
+    const dashboardCalls = mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length;
+    await user.click(screen.getByRole("button", { name: /load sample household activity/i }));
+    expect(await screen.findByText(/added simulated activity: 2\sdevices, 740 website lookups, a 9:00 PM bedtime for Kids' tablet/i)).toBeInTheDocument();
+    expect(mocks.api.mock.calls.some((c) => c[0] === "/demo/household-activity" && c[1]?.method === "POST")).toBe(true);
+    await waitFor(() => expect(mocks.api.mock.calls.filter((c) => c[0] === "/dashboard").length).toBeGreaterThan(dashboardCalls));
+  });
+});
+
+describe("Report card household insights", () => {
+  it("adds privacy, vulnerability, and bedtime findings to the report", async () => {
+    vi.spyOn(window, "print").mockImplementation(() => {});
+    withHousehold([
+      [/^\/privacy\/report/, privacyReport],
+      ["/vulnerabilities", { status: "ok", catalog_size: 1756, catalog_is_sample: false, devices_with_matches: 1, devices: [netgearMatch] }],
+      ["/bedtime", { devices: [{ device_id: 2, name: "Kids' tablet", block_start: "21:00", block_end: "07:00", internet_enabled: true, active_now: false, schedule_valid: true, summary: "Goes offline at 9:00 PM" }] }],
+    ]);
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /^report card$/i }));
+    const section = await screen.findByTestId("report-privacy-security");
+    expect(await within(section).findByText(/contacted 2\stracking companies 80 times/i)).toBeInTheDocument();
+    expect(within(section).getByText(/kitchen-echo/)).toBeInTheDocument();
+    expect(within(section).getByText(/bedtime for kids' tablet: every night, 9:00 PM to 7:00 AM/i)).toBeInTheDocument();
+    const report = screen.getByRole("dialog", { name: /test home/i });
+    expect(within(report).getByText(/update kitchen-echo/i)).toBeInTheDocument();
   });
 });

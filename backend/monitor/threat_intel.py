@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from backend import config
+from backend.tls import https_context
 
 logger = logging.getLogger("homeradar.threat_intel")
 _ABUSEIPDB_ENDPOINT = "https://api.abuseipdb.com/api/v2/check"
@@ -117,7 +118,7 @@ def check_ip(conn, ip: str) -> Reputation:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:  # nosec B310: fixed HTTPS host
+        with urllib.request.urlopen(request, timeout=10, context=https_context()) as response:  # nosec B310: fixed HTTPS host
             data = json.load(response)["data"]
         confidence = int(data.get("abuseConfidenceScore", 0))
         detail = (

@@ -5,7 +5,7 @@ import threading
 import time
 from collections import OrderedDict
 
-from dnslib import DNSRecord, RCODE
+from dnslib import DNSRecord, QTYPE, RCODE
 
 
 def cache_key(payload: bytes) -> tuple[str, int, int]:
@@ -38,6 +38,10 @@ class DNSCache:
         response.header.id = request_id
         remaining = max(0, min(original_ttl, int(expires - now)))
         for record in (*response.rr, *response.auth, *response.ar):
+            # An EDNS OPT record's "ttl" field carries flags (e.g. the DNSSEC OK
+            # bit), not a lifetime, so it must not be rewritten.
+            if record.rtype == QTYPE.OPT:
+                continue
             record.ttl = min(record.ttl, remaining)
         return response.pack()
 
@@ -59,6 +63,8 @@ class DNSCache:
     def clear(self) -> None:
         with self._lock:
             self._entries.clear()
+            self.hits = 0
+            self.misses = 0
 
     def stats(self) -> dict:
         with self._lock:

@@ -12,6 +12,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 from backend import config
+from backend.tls import https_context
 
 
 def parse_catalog(payload: dict) -> list[dict]:
@@ -47,7 +48,7 @@ def _validated_catalog_url(value: str) -> str:
 def update_catalog(conn, url: str = config.CISA_KEV_URL, timeout: float = 30) -> int:
     safe_url = _validated_catalog_url(url)
     request = urllib.request.Request(safe_url, headers={"User-Agent": "HomeRadar/0.3"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310: HTTPS validated above
+    with urllib.request.urlopen(request, timeout=timeout, context=https_context()) as response:  # nosec B310: HTTPS validated above
         payload = json.load(response)
     records = parse_catalog(payload)
     now = datetime.now(timezone.utc).isoformat()
@@ -86,11 +87,12 @@ def update_catalog(conn, url: str = config.CISA_KEV_URL, timeout: float = 30) ->
 def search_catalog(conn, query: str = "", limit: int = 100) -> list[dict]:
     limit = max(1, min(limit, 500))
     if query:
-        pattern = f"%{query}%"
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
         rows = conn.execute(
             """SELECT * FROM cisa_kev
-               WHERE cve_id LIKE ? OR vendor_project LIKE ? OR product LIKE ?
-                    OR vulnerability_name LIKE ?
+               WHERE cve_id LIKE ? ESCAPE '\\' OR vendor_project LIKE ? ESCAPE '\\'
+                    OR product LIKE ? ESCAPE '\\' OR vulnerability_name LIKE ? ESCAPE '\\'
                ORDER BY date_added DESC LIMIT ?""",
             (pattern, pattern, pattern, pattern, limit),
         ).fetchall()

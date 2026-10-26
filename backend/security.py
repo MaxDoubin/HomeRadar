@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from backend import config
 from backend.db import get_conn
 from backend.pairing import verify_token
 
@@ -38,7 +39,35 @@ _PROTECTED_PREFIXES = (
     "/scan",
     "/setup",
     "/pair",
+    "/bedtime",
+    "/privacy",
+    "/vulnerabilities",
+    "/habits",
 )
+
+# Public-demo mode (HOMERADAR_DEMO_MODE=true, e.g. the render.yaml deployment)
+# lets visitors who are not on the appliance use the dashboard without pairing,
+# so judges can open a link and click around. It must NEVER be enabled on a real
+# household appliance: it hands every visitor the same access the appliance's
+# own screen has. Operations that could lock other visitors out, leak the
+# database, or make the server fetch or send things on a stranger's behalf stay
+# disabled for remote visitors even in demo mode.
+_DEMO_DENIED_PREFIXES = ("/backups",)
+_DEMO_DENIED_REQUESTS = frozenset(
+    {
+        ("POST", "/pair/regenerate"),
+        ("POST", "/pair/start"),
+        ("PATCH", "/settings"),
+        ("POST", "/digest/send"),
+        ("POST", "/blocklists/update"),
+        ("POST", "/threat-intel/cisa-kev/update"),
+    }
+)
+
+
+def demo_denies(method: str, path: str) -> bool:
+    """True when a remote public-demo visitor may not perform this request."""
+    return path.startswith(_DEMO_DENIED_PREFIXES) or (method.upper(), path) in _DEMO_DENIED_REQUESTS
 
 
 def is_local_host(host: str | None) -> bool:
@@ -118,8 +147,19 @@ class ApplianceSecurityMiddleware(BaseHTTPMiddleware):
             return _apply_security_headers(await call_next(request))
 
         path = request.url.path.rstrip("/") or "/"
+        local = is_local_host(request.client.host if request.client else None)
+        if config.DEMO_MODE_ENABLED and not local:
+            if demo_denies(request.method, path):
+                return _apply_security_headers(
+                    JSONResponse(
+                        {"detail": "This action is turned off in the public demo."},
+                        status_code=403,
+                    )
+                )
+            # See the public-demo note above: remote visitors are treated like
+            # the appliance's own screen for everything else.
+            local = True
         if path_requires_auth(path):
-            local = is_local_host(request.client.host if request.client else None)
             token = extract_presented_token(request.headers, request.cookies)
             token_valid = False
             if token:

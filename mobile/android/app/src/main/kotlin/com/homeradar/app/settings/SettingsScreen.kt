@@ -1,5 +1,7 @@
 package com.homeradar.app.settings
 
+import android.content.Intent
+import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,13 +10,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,9 +31,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.homeradar.app.DashboardViewModel
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * The one screen (besides the "scan network" action) that makes direct
@@ -36,17 +50,27 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsScreen(viewModel: DashboardViewModel) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var isLoading by remember { mutableStateOf(true) }
     var isSaving by remember { mutableStateOf(false) }
     var isScanning by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    var confirmForget by remember { mutableStateOf(false) }
 
     var householdName by remember { mutableStateOf("") }
     var digestEmail by remember { mutableStateOf("") }
     var dnsUpstream by remember { mutableStateOf("") }
     var notificationsEnabled by remember { mutableStateOf(true) }
-    var dnsEnabled by remember { mutableStateOf(true) }
+    var dnsEnabled by remember { mutableStateOf(false) }
+    var phoneNotificationsAllowed by remember {
+        mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
+    }
+
+    // Re-check after the user returns from the system notification settings.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        phoneNotificationsAllowed = NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
 
     LaunchedEffect(Unit) {
         isLoading = true
@@ -58,15 +82,34 @@ fun SettingsScreen(viewModel: DashboardViewModel) {
             notificationsEnabled = loaded.notifications_enabled
             dnsEnabled = loaded.dns_enabled
         } catch (t: Throwable) {
+            viewModel.onApiError(t)
             statusMessage = "Could not load settings: ${t.message}"
         } finally {
             isLoading = false
         }
     }
 
+    if (confirmForget) {
+        AlertDialog(
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Forget this appliance?") },
+            text = { Text("This phone will stop receiving Home Radar alerts until you pair it again.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmForget = false
+                    viewModel.forgetAppliance()
+                }) { Text("Forget") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmForget = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
         Text("Settings", style = MaterialTheme.typography.headlineSmall)
@@ -110,13 +153,34 @@ fun SettingsScreen(viewModel: DashboardViewModel) {
                     onCheckedChange = { notificationsEnabled = it },
                 )
             }
+            // DNS filtering is switched on the appliance itself, so this is status only.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+            ) {
+                Text("DNS filtering")
+                Text(if (dnsEnabled) "On" else "Off (set on the appliance)")
+            }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("DNS filtering enabled")
-                Switch(checked = dnsEnabled, onCheckedChange = { dnsEnabled = it })
+                Text("Alerts on this phone")
+                if (phoneNotificationsAllowed) {
+                    Text("On")
+                } else {
+                    TextButton(onClick = {
+                        context.startActivity(
+                            Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(AndroidSettings.EXTRA_APP_PACKAGE, context.packageName)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }) { Text("Off. Turn on") }
+                }
             }
 
             Spacer(Modifier.height(16.dp))
@@ -132,11 +196,11 @@ fun SettingsScreen(viewModel: DashboardViewModel) {
                                     "digest_email" to digestEmail,
                                     "dns_upstream" to dnsUpstream,
                                     "notifications_enabled" to notificationsEnabled,
-                                    "dns_enabled" to dnsEnabled,
                                 ),
                             )
                             statusMessage = "Saved"
                         } catch (t: Throwable) {
+                            viewModel.onApiError(t)
                             statusMessage = "Could not save: ${t.message}"
                         } finally {
                             isSaving = false
@@ -159,10 +223,18 @@ fun SettingsScreen(viewModel: DashboardViewModel) {
                     statusMessage = null
                     scope.launch {
                         try {
-                            viewModel.requireClient().postScan()
-                            statusMessage = "Scan started"
+                            val result = viewModel.requireClient().postScan()
+                            val found = runCatching {
+                                result.jsonObject["devices_found"]?.jsonPrimitive?.intOrNull
+                            }.getOrNull()
+                            statusMessage = when (found) {
+                                null -> "Scan complete"
+                                1 -> "Scan complete: found 1 device"
+                                else -> "Scan complete: found $found devices"
+                            }
                         } catch (t: Throwable) {
-                            statusMessage = "Could not start scan: ${t.message}"
+                            viewModel.onApiError(t)
+                            statusMessage = "Could not scan: ${t.message}"
                         } finally {
                             isScanning = false
                         }
@@ -172,6 +244,14 @@ fun SettingsScreen(viewModel: DashboardViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(if (isScanning) "Scanning…" else "Scan network now")
+            }
+
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = { confirmForget = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text("Forget appliance")
             }
         }
 

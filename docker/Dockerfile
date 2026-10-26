@@ -25,6 +25,7 @@ RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY --chown=homeradar:homeradar backend backend
 COPY --chown=homeradar:homeradar kiosk kiosk
 COPY --chown=homeradar:homeradar --from=dashboard /src/frontend/dist frontend/dist
+COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/homeradar-entrypoint
 
 ENV HOMERADAR_DB_PATH=/data/homeradar.db \
     HOMERADAR_DATA_DIR=/data \
@@ -37,11 +38,13 @@ ENV HOMERADAR_DB_PATH=/data/homeradar.db \
 
 VOLUME ["/data"]
 EXPOSE 53/udp 53/tcp 8000/tcp
-# hadolint ignore=DL3066
-USER homeradar
+# No USER here on purpose: the entrypoint starts as root only to drop to the
+# "homeradar" user while keeping NET_BIND_SERVICE/NET_RAW as ambient
+# capabilities, which a plain non-root USER can't receive via --cap-add.
 
 # hadolint ignore=DL3025
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl --fail http://127.0.0.1:8000/health || exit 1
 
+ENTRYPOINT ["/usr/local/bin/homeradar-entrypoint"]
 CMD ["python3", "-m", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]

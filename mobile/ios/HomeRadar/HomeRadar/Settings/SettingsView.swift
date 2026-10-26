@@ -14,7 +14,12 @@ struct SettingsView: View {
                 }
 
                 Section("Network") {
-                    Toggle("DNS Filtering Enabled", isOn: $viewModel.dnsEnabled)
+                    HStack {
+                        Text("DNS Filtering")
+                        Spacer()
+                        Text(viewModel.dnsEnabled ? "On" : "Off (set on the appliance)")
+                            .foregroundStyle(.secondary)
+                    }
                     TextField("Upstream DNS", text: $viewModel.dnsUpstream)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()

@@ -2,8 +2,12 @@ package com.homeradar.core.net
 
 import com.homeradar.core.model.HomeRadarJson
 import com.homeradar.core.model.SnapshotMessage
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.decodeFromString
 import okhttp3.OkHttpClient
@@ -20,6 +24,24 @@ fun nextBackoffMillis(previousMillis: Long): Long {
     if (previousMillis < INITIAL_BACKOFF_MILLIS) return INITIAL_BACKOFF_MILLIS
     val doubled = previousMillis * 2
     return if (doubled > MAX_BACKOFF_MILLIS) MAX_BACKOFF_MILLIS else doubled
+}
+
+/** Close code the appliance sends when this phone's pairing token is missing or revoked. */
+const val TOKEN_REJECTED_CLOSE_CODE: Int = 4401
+
+/** Why one websocket connection ended or failed to open. */
+data class SocketDisconnect(val closeCode: Int? = null, val httpStatus: Int? = null) {
+    /** The appliance definitively rejected this phone's pairing token. */
+    val tokenRejected: Boolean
+        get() = closeCode == TOKEN_REJECTED_CLOSE_CODE || httpStatus == 401
+
+    /**
+     * The upgrade was refused before the socket opened. The appliance rejects a
+     * bad token by closing with 4401 before accepting, which surfaces here as
+     * HTTP 403, so callers should confirm over REST before unpairing.
+     */
+    val handshakeRefused: Boolean
+        get() = httpStatus == 403
 }
 
 /** Build the real dashboard WebSocket path without embedding credentials. */
@@ -42,9 +64,21 @@ class DashboardSocket(
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
 
+    // A StateFlow can't signal a failed reconnect (false -> false isn't an emission),
+    // so every lost or refused connection is also emitted here.
+    private val _disconnects = MutableSharedFlow<SocketDisconnect>(
+        extraBufferCapacity = 4,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val disconnects: SharedFlow<SocketDisconnect> = _disconnects.asSharedFlow()
+
     private var webSocket: WebSocket? = null
 
+    @Volatile
+    private var closedByClient = false
+
     fun connect(path: String = "/ws") {
+        closedByClient = false
         val request = Request.Builder().url(buildWsUrl(baseUrl, path)).apply {
             tokenProvider.currentToken()?.takeIf { it.isNotBlank() }?.let {
                 header(AUTH_HEADER_NAME, it)
@@ -54,6 +88,7 @@ class DashboardSocket(
     }
 
     fun close() {
+        closedByClient = true
         webSocket?.close(NORMAL_CLOSURE_CODE, null)
         webSocket = null
         _connected.value = false
@@ -68,12 +103,19 @@ class DashboardSocket(
             .onSuccess { _snapshots.value = it }
     }
 
+    override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+        // Complete a server-initiated close (e.g. 4401 token revoked) so onClosed fires.
+        webSocket.close(NORMAL_CLOSURE_CODE, null)
+    }
+
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
         _connected.value = false
+        if (!closedByClient) _disconnects.tryEmit(SocketDisconnect(closeCode = code))
     }
 
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         _connected.value = false
+        if (!closedByClient) _disconnects.tryEmit(SocketDisconnect(httpStatus = response?.code))
     }
 
     private companion object {

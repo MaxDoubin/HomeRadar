@@ -100,6 +100,10 @@ CISA_KEV_URL = os.environ.get(
 # that fabricates security events.
 DEMO_MODE_ENABLED = os.environ.get("HOMERADAR_DEMO_MODE", "false").lower() in {"1", "true", "yes"}
 
+# Advertise the appliance over mDNS so the phone apps can find it. The desktop
+# app turns this off: a personal laptop shouldn't announce itself as an appliance.
+MDNS_ADVERTISE = os.environ.get("HOMERADAR_MDNS_ADVERTISE", "true").lower() in {"1", "true", "yes"}
+
 # Household and digest settings
 HOUSEHOLD_NAME = os.environ.get("HOMERADAR_HOUSEHOLD_NAME", "My Home")
 PUBLIC_BASE_URL = os.environ.get("HOMERADAR_PUBLIC_URL", "http://homeradar.local:8000")

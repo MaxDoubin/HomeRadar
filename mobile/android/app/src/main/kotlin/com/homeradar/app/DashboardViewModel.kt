@@ -13,14 +13,15 @@ import com.homeradar.core.model.Alert
 import com.homeradar.core.model.Device
 import com.homeradar.core.net.DashboardSocket
 import com.homeradar.core.net.HomeRadarClient
+import com.homeradar.core.net.isUnauthorized
 import com.homeradar.core.net.nextBackoffMillis
 import com.homeradar.core.state.DashboardState
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
 
@@ -56,7 +57,7 @@ data class DashboardUiState(
 class DashboardViewModel(application: Application) : AndroidViewModel(application) {
 
     private val connectionStore = ConnectionStore(application)
-    private val dashboardState = DashboardState()
+    private var dashboardState = DashboardState()
 
     private var client: HomeRadarClient? = null
     private var socket: DashboardSocket? = null
@@ -70,6 +71,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _uiState = MutableStateFlow(DashboardUiState())
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
+
+    /** Shown on the pairing screen after the appliance revoked this phone's token. */
+    private val _pairingNotice = MutableStateFlow<String?>(null)
+    val pairingNotice: StateFlow<String?> = _pairingNotice.asStateFlow()
 
     private val processLifecycleObserver = object : DefaultLifecycleObserver {
         override fun onStart(owner: LifecycleOwner) {
@@ -92,6 +97,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
 
     /** Call after `ConnectScreen` finishes pairing (address+token are both now saved). */
     fun refresh() {
+        _pairingNotice.value = null
         viewModelScope.launch {
             refreshConnectionState(connectionStore.addressFlow.firstOrNull())
         }
@@ -117,8 +123,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 _uiState.value = _uiState.value.copy(
                     devices = _uiState.value.devices.map { if (it.id == deviceId) updated else it },
                 )
-            } catch (_: Exception) {
-                // Left as-is; the next socket snapshot will reconcile the real state.
+            } catch (e: Exception) {
+                // Otherwise left as-is; the next socket snapshot reconciles the real state.
+                onApiError(e)
             } finally {
                 _uiState.value = _uiState.value.copy(updatingDeviceIds = _uiState.value.updatingDeviceIds - deviceId)
             }
@@ -138,11 +145,52 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                         if (it.id == alertId) it.copy(is_resolved = if (result.is_resolved) 1 else 0) else it
                     },
                 )
-            } catch (_: Exception) {
-                // Left as-is; the next socket snapshot will reconcile the real state.
+            } catch (e: Exception) {
+                // Otherwise left as-is; the next socket snapshot reconciles the real state.
+                onApiError(e)
             } finally {
                 _uiState.value = _uiState.value.copy(resolvingAlertIds = _uiState.value.resolvingAlertIds - alertId)
             }
+        }
+    }
+
+    /** Route any REST failure here: a 401 means the appliance unpaired this phone. */
+    fun onApiError(error: Throwable) {
+        if (error.isUnauthorized) handleUnpaired()
+    }
+
+    /** User-initiated: forget the saved appliance and return to the pairing screen. */
+    fun forgetAppliance() {
+        _pairingNotice.value = null
+        disconnect()
+        connectionStore.clearToken()
+        viewModelScope.launch { connectionStore.clearAddress() }
+    }
+
+    private fun handleUnpaired() {
+        _pairingNotice.value = "This phone was unpaired from Home Radar. Pair again to keep getting alerts."
+        disconnect()
+        // Keep the saved address so re-pairing only needs a new code.
+        connectionStore.clearToken()
+    }
+
+    private fun disconnect() {
+        lastBaseUrl = null
+        teardownSocket()
+        client = null
+        dashboardState = DashboardState()
+        _uiState.value = DashboardUiState()
+        _connectionState.value = ConnectionState.NotConnected
+    }
+
+    /** Confirms over REST that a refused websocket upgrade really means a revoked token. */
+    private suspend fun tokenConfirmedRevoked(): Boolean {
+        val homeRadarClient = client ?: return false
+        return try {
+            homeRadarClient.getDevices()
+            false
+        } catch (e: Exception) {
+            e.isUnauthorized
         }
     }
 
@@ -167,53 +215,49 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         teardownSocket()
         val newSocket = DashboardSocket(baseUrl, connectionStore)
         socket = newSocket
-        observeSnapshots(newSocket)
-        observeConnectivity(newSocket)
+        // One parent job, so teardownSocket() stops every collector for this socket together.
         reconnectJob = viewModelScope.launch {
             var backoff = 0L
-            newSocket.connect()
-            // The first emission from a freshly-created StateFlow is always the initial
-            // `false` from before any connect attempt resolved -- drop it so it isn't
-            // mistaken for a real disconnect and doesn't trigger an immediate extra retry.
-            newSocket.connected.drop(1).collect { connected ->
-                if (connected) {
-                    backoff = 0L
-                } else {
+            launch { collectSnapshots(newSocket) }
+            launch {
+                newSocket.connected.collect { connected ->
+                    _uiState.value = _uiState.value.copy(socketConnected = connected)
+                    if (connected) backoff = 0L
+                }
+            }
+            // Subscribed before connect() so the first failure can't be missed.
+            launch(start = CoroutineStart.UNDISPATCHED) {
+                newSocket.disconnects.collect { event ->
+                    if (event.tokenRejected || (event.handshakeRefused && tokenConfirmedRevoked())) {
+                        handleUnpaired()
+                        return@collect
+                    }
                     backoff = nextBackoffMillis(backoff)
                     delay(backoff)
                     newSocket.connect()
                 }
             }
+            newSocket.connect()
         }
     }
 
-    private fun observeSnapshots(socket: DashboardSocket) {
-        viewModelScope.launch {
-            socket.snapshots.collect { snapshot ->
-                if (snapshot != null) {
-                    dashboardState.updateSnapshot(snapshot)
-                    val newlyAppeared = dashboardState.applySnapshot(snapshot.alerts)
+    private suspend fun collectSnapshots(socket: DashboardSocket) {
+        socket.snapshots.collect { snapshot ->
+            if (snapshot != null) {
+                dashboardState.updateSnapshot(snapshot)
+                val newlyAppeared = dashboardState.applySnapshot(snapshot.alerts)
 
-                    _uiState.value = _uiState.value.copy(
-                        deviceCount = snapshot.status.device_count,
-                        openAlertCount = snapshot.status.open_alert_count,
-                        securityScore = snapshot.status.security_score,
-                        devices = snapshot.devices,
-                        alerts = snapshot.alerts,
-                    )
+                _uiState.value = _uiState.value.copy(
+                    deviceCount = snapshot.status.device_count,
+                    openAlertCount = snapshot.status.open_alert_count,
+                    securityScore = snapshot.status.security_score,
+                    devices = snapshot.devices,
+                    alerts = snapshot.alerts,
+                )
 
-                    if (newlyAppeared.isNotEmpty()) {
-                        AlertNotifier.notifyNewAlerts(getApplication(), newlyAppeared)
-                    }
+                if (newlyAppeared.isNotEmpty()) {
+                    AlertNotifier.notifyNewAlerts(getApplication(), newlyAppeared)
                 }
-            }
-        }
-    }
-
-    private fun observeConnectivity(socket: DashboardSocket) {
-        viewModelScope.launch {
-            socket.connected.collect { connected ->
-                _uiState.value = _uiState.value.copy(socketConnected = connected)
             }
         }
     }

@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import smtplib
-import ssl
 from email.message import EmailMessage
 
 from backend import config
 from backend.db import models
 from backend.monitor.trust_scoring import household_score
+from backend.tls import https_context
 
 
 def build_digest(conn) -> tuple[str, str]:
@@ -80,7 +80,7 @@ def send_digest(conn, recipient: str | None = None) -> dict:
 
     with smtplib.SMTP(config.SMTP_HOST, config.SMTP_PORT, timeout=20) as smtp:
         if config.SMTP_USE_TLS:
-            smtp.starttls(context=ssl.create_default_context())
+            smtp.starttls(context=https_context())
         if config.SMTP_USERNAME:
             smtp.login(config.SMTP_USERNAME, config.SMTP_PASSWORD)
         smtp.send_message(message)

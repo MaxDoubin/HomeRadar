@@ -34,8 +34,7 @@ the backend serve the built dashboard from the same origin (its default behavior
 
 ## Ground rules
 
-- Keep the MVP feature list (see `docs/PROJECT_PLAN.md`) as the source of truth for scope
-  - stretch features live under "2.0" until the MVP milestones are done.
+- Keep the "Included features" list in the README as the source of truth for scope.
 - Home Radar must never require the family to put it inline (no bridging/routing). Any
   change to network positioning needs a clear failure-mode story if the change breaks.
 - New discovery/monitoring code should degrade gracefully without root privileges or a
@@ -49,6 +48,7 @@ the backend serve the built dashboard from the same origin (its default behavior
 
 ## Reporting issues
 
-Open a GitHub issue with steps to reproduce, your OS/hardware, and relevant logs. For
-security-relevant findings (e.g. a way to bypass the DNS proxy or spoof a trusted
-device), please open an issue and flag it clearly as security-related.
+Open a GitHub issue with steps to reproduce, your OS/hardware, and relevant logs. Do
+**not** open a public issue for security vulnerabilities (e.g. a way to bypass the DNS
+proxy or spoof a trusted device); report them privately as described in
+[SECURITY.md](../SECURITY.md).

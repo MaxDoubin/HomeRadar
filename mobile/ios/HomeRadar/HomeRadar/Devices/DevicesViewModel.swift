@@ -34,6 +34,7 @@ final class DevicesViewModel: ObservableObject {
                 devices[index] = updated
             }
         } catch {
+            session.handle(error)
             errorMessage = "Couldn't update that device. Try again."
         }
     }
