@@ -453,7 +453,7 @@ def refresh_cisa_kev():
                     "Couldn't reach cisa.gov to update the vulnerability catalog. "
                     "Check the internet connection and try again."
                 ),
-                "error_detail": str(exc)[:500],
+                "error_detail": type(exc).__name__,
             },
         )
 

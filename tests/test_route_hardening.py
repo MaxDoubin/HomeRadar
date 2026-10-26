@@ -179,7 +179,8 @@ def test_cisa_update_failure_is_friendly(client, auth_headers, monkeypatch):
     body = response.json()
     assert body["detail"].startswith("Couldn't reach cisa.gov")
     assert "urlopen" not in body["detail"]
-    assert "Tunnel connection failed" in body["error_detail"]
+    assert body["error_detail"] == "OSError"
+    assert "Tunnel connection failed" not in response.text
 
 
 # --- /setup lock -----------------------------------------------------------
