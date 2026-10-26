@@ -162,7 +162,7 @@ afterEach(() => {
 
 async function renderApp() {
   const utils = render(<App />);
-  await screen.findByRole("heading", { name: /your network at a glance/i });
+  await screen.findByTestId("overview");
   return utils;
 }
 
@@ -177,7 +177,7 @@ describe("App navigation", () => {
 
     await user.click(within(nav).getByRole("button", { name: /devices/i }));
     await screen.findByRole("button", { name: /^scan network$/i });
-    expect(screen.queryByRole("heading", { name: /your network at a glance/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("overview")).not.toBeInTheDocument();
 
     await user.click(within(nav).getByRole("button", { name: /traffic/i }));
     await screen.findByRole("heading", { name: /^traffic$/i });
@@ -558,9 +558,9 @@ describe("Household letter grade", () => {
     expect(await screen.findByTestId("household-grade")).toHaveTextContent("B+");
     expect(screen.getByText(/solid, with a few things worth reviewing/i)).toBeInTheDocument();
     const strip = screen.getByLabelText(/protection summary/i);
-    expect(strip).toHaveTextContent(/protecting 2 devices/i);
-    expect(strip).toHaveTextContent(/5 threats blocked today/i);
-    expect(strip).toHaveTextContent(/\$0 \/ month/i);
+    expect(strip).toHaveTextContent(/2\s*devices protected/i);
+    expect(strip).toHaveTextContent(/5\s*threats blocked today/i);
+    expect(strip).toHaveTextContent(/\$0\s*a month/i);
   });
 });
 
@@ -652,23 +652,23 @@ describe("Demo story", () => {
     .filter((c) => c[0] === "/demo/simulate-attack")
     .map((c) => JSON.parse(c[1].body).kind);
 
-  it("jumps to Overview and fires new_device, deauth, then malicious_dns a few seconds apart", async () => {
+  it("opens Live view and fires new_device, malicious_dns, then deauth a few seconds apart", async () => {
     const button = await openDemoPanel();
     vi.useFakeTimers();
     fireEvent.click(button);
 
-    expect(screen.getByRole("heading", { name: /your network at a glance/i })).toBeInTheDocument();
+    expect(screen.getByTestId("live-view")).toBeInTheDocument();
     expect(storyCalls()).toEqual([]);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(800); });
     expect(storyCalls()).toEqual(["new_device"]);
     expect(screen.getByText(/demo story · 1\/3 · simulated/i)).toBeInTheDocument();
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(storyCalls()).toEqual(["new_device", "deauth"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+    expect(storyCalls()).toEqual(["new_device", "malicious_dns"]);
 
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
-    expect(storyCalls()).toEqual(["new_device", "deauth", "malicious_dns"]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+    expect(storyCalls()).toEqual(["new_device", "malicious_dns", "deauth"]);
     expect(screen.queryByText(/demo story ·/i)).not.toBeInTheDocument();
   });
 
@@ -684,7 +684,7 @@ describe("Demo story", () => {
     const button = await openDemoPanel();
     vi.useFakeTimers();
     fireEvent.click(button);
-    await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20000); });
     expect(storyCalls()).toEqual(["new_device"]);
     expect(screen.getByText(/demo story stopped: demo mode isn't enabled/i)).toBeInTheDocument();
   });
@@ -724,5 +724,107 @@ describe("Devices bandwidth sparkline", () => {
     const panel = container.querySelector(".devices-panel.full");
     await waitFor(() => expect(panel.querySelector(".sparkline")).toBeTruthy());
     expect(within(panel).getByText(/no traffic/i)).toBeInTheDocument();
+  });
+});
+
+// ---- Live view: staged "watch it catch an intruder" demo -------------------
+
+describe("Live view", () => {
+  const intruder = {
+    id: 9,
+    hostname: null,
+    vendor: "Espressif",
+    model: null,
+    ip: "192.168.1.77",
+    mac: "24:0A:C4:12:34:56",
+    device_type: "iot_device",
+    is_authorized: 0,
+    trust_score: 35,
+    first_seen: new Date().toISOString(),
+    last_seen: new Date().toISOString(),
+    fingerprint_confidence: 0.62,
+  };
+  const intruderAlert = {
+    id: 201,
+    device_id: intruder.id,
+    title: "New device connected",
+    description: "Espressif joined the network. (Simulated for demonstration.)",
+    severity: "warning",
+    is_resolved: 0,
+    created_at: new Date().toISOString(),
+  };
+
+  function mockLive({ demoOff = false } = {}) {
+    mocks.api.mockImplementation((path, options = {}) => {
+      if (path === "/demo/simulate-attack") {
+        if (demoOff) {
+          const error = new Error("Not found");
+          error.status = 404;
+          return Promise.reject(error);
+        }
+        const { kind } = JSON.parse(options.body);
+        if (kind === "malicious_dns") {
+          return Promise.resolve({ kind, alert_id: 202, device: clone(intruder), alert: { ...intruderAlert, id: 202, severity: "critical", title: "Suspicious connection: 203.0.113.9" } });
+        }
+        return Promise.resolve({ kind, alert_id: 201, alert: clone(intruderAlert), device: clone(intruder) });
+      }
+      if (path === "/devices/9/trust") return Promise.resolve({ score: 35, reasons: ["Not approved by the household yet"] });
+      return defaultApiImpl(path, options);
+    });
+  }
+
+  async function openLive() {
+    await renderApp();
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole("navigation")).getByRole("button", { name: /live view/i }));
+    await screen.findByTestId("live-view");
+    return user;
+  }
+
+  const kinds = () => mocks.api.mock.calls.filter((c) => c[0] === "/demo/simulate-attack").map((c) => JSON.parse(c[1].body).kind);
+
+  it("fires the scenario's kind and investigates the device the backend returned", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /unknown device joins/i }));
+    expect(kinds()).toEqual(["new_device"]);
+
+    const panel = await screen.findByText(/investigating new device|investigation complete/i);
+    const investigation = panel.closest(".investigation");
+    expect(within(investigation).getByText(/24:0A:C4:12:34:56/)).toBeInTheDocument();
+    await waitFor(() => expect(within(investigation).getByText("Espressif")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(within(investigation).getByText("35 / 100")).toBeInTheDocument(), { timeout: 5000 });
+    expect(screen.getByText(/demo: simulated events/i)).toBeInTheDocument();
+  });
+
+  it("blocks the investigated device through the authorization API", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /unknown device joins/i }));
+    const block = await screen.findByRole("button", { name: /block this device/i }, { timeout: 6000 });
+    await user.click(block);
+    await waitFor(() => {
+      const auth = mocks.api.mock.calls.find((c) => c[0] === "/devices/9/authorization");
+      expect(auth).toBeTruthy();
+      expect(JSON.parse(auth[1].body)).toEqual({ state: 2 });
+      const resolveCall = mocks.api.mock.calls.find((c) => c[0] === "/alerts/201");
+      expect(JSON.parse(resolveCall[1].body)).toEqual({ resolved: true });
+    });
+  });
+
+  it("shows the blocked destination from the real alert for the malware scenario", async () => {
+    mockLive();
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /malware connection/i }));
+    expect(kinds()).toEqual(["malicious_dns"]);
+    expect(await screen.findByRole("heading", { name: /blocked 203\.0\.113\.9/i })).toBeInTheDocument();
+  });
+
+  it("hides the scenarios and explains why when demo mode is off", async () => {
+    mockLive({ demoOff: true });
+    const user = await openLive();
+    await user.click(screen.getByRole("button", { name: /wi-fi attack/i }));
+    expect(await screen.findByText(/demo mode isn't enabled/i)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /demo scenarios/i })).not.toBeInTheDocument();
   });
 });

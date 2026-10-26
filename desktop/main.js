@@ -196,7 +196,7 @@ async function createWindow() {
     minWidth: 940,
     minHeight: 650,
     title: "Home Radar",
-    backgroundColor: "#020806",
+    backgroundColor: "#f6f5f1",
     show: false,
     webPreferences: {
       nodeIntegration: false,

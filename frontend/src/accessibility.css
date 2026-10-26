@@ -1,7 +1,7 @@
 /* Accessibility and interaction polish layered over the visual system. */
 
 :where(button, a, input, textarea, select):focus-visible {
-  outline: 2px solid var(--green);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
@@ -27,45 +27,16 @@ a {
 }
 
 ::selection {
-  color: #03110c;
-  background: var(--green);
+  color: var(--text);
+  background: var(--accent-soft);
 }
 
 * {
-  scrollbar-color: #245a49 #07130f;
+  scrollbar-color: var(--line-strong) transparent;
   scrollbar-width: thin;
 }
 
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-*::-webkit-scrollbar-track {
-  background: #07130f;
-}
-
-*::-webkit-scrollbar-thumb {
-  border: 2px solid #07130f;
-  border-radius: 999px;
-  background: #245a49;
-}
-
-*::-webkit-scrollbar-thumb:hover {
-  background: #31765f;
-}
-
 @media (max-width: 720px) {
-  .sidebar {
-    height: calc(64px + env(safe-area-inset-bottom));
-    padding-bottom: calc(5px + env(safe-area-inset-bottom));
-  }
-
-  .content {
-    padding-bottom: calc(100px + env(safe-area-inset-bottom));
-  }
-
-  nav button,
   .scan-mini,
   .primary {
     min-height: 42px;
@@ -85,15 +56,13 @@ a {
 
 @media (prefers-contrast: more) {
   :root {
-    --line: #3c675b;
-    --muted: #a9c0b9;
+    --line: var(--line-strong);
+    --muted: var(--text-2);
   }
 
-  .card,
-  .toolbar input,
-  .settings-form input,
-  .policy-times input,
-  .domain-rule input {
+  .panel,
+  input,
+  textarea {
     border-width: 2px;
   }
 }

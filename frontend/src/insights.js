@@ -90,6 +90,61 @@ export function deviceName(device) {
   return device?.hostname || device?.model || device?.vendor || "Unknown device";
 }
 
+// Non-breaking space keeps a number on the same line as its noun.
+export function plural(count, word, pluralWord = `${word}s`) {
+  return `${count}\u00a0${count === 1 ? word : pluralWord}`;
+}
+
+// What a chip maker's parts usually end up in. Phrased as a likelihood: a
+// vendor prefix narrows the field, it doesn't identify the product.
+const VENDOR_HINTS = [
+  [/espressif/i, "Chips from this maker usually power smart plugs, bulbs, and other low-cost smart-home gadgets."],
+  [/tuya/i, "This maker's modules usually power budget smart-home gadgets."],
+  [/raspberry/i, "Usually a hobby computer someone in the house set up."],
+  [/amazon/i, "Usually an Echo speaker, Fire TV, or Kindle."],
+  [/apple/i, "Usually an iPhone, iPad, Mac, or Apple TV."],
+  [/samsung|lg electronics|vizio|roku|tcl|hisense/i, "Usually a smart TV, streaming stick, or phone."],
+  [/google|nest/i, "Usually a Nest speaker, display, camera, or Chromecast."],
+  [/hikvision|dahua|wyze|reolink|ring/i, "Usually a security camera or video doorbell."],
+  [/nintendo|sony|microsoft/i, "Usually a game console or controller."],
+];
+
+export function vendorHint(vendor) {
+  const match = VENDOR_HINTS.find(([pattern]) => pattern.test(vendor || ""));
+  return match ? match[1] : "";
+}
+
+export function overviewHeadline({ alerts = [], devices = [], score = 100 } = {}) {
+  const threats = alerts.filter((alert) => alert.severity === "critical").length;
+  const pending = devices.filter((device) => device.is_authorized === 0).length;
+  const others = Math.max(0, alerts.length - threats);
+  const strong = score >= 80;
+  const lead = strong ? "Your home is protected." : "Home Radar is protecting your home.";
+  if (threats) {
+    return { tone: "danger", text: `Home Radar caught something. ${plural(threats, "alert needs", "alerts need")} you.` };
+  }
+  const review = pending || others;
+  if (review) {
+    const what = pending ? plural(pending, "device needs", "devices need") : plural(others, "alert needs", "alerts need");
+    return { tone: "warn", text: `${lead} ${what} your review.` };
+  }
+  if (!strong) return { tone: "warn", text: `${lead} A few changes would make it safer.` };
+  return { tone: "good", text: "Your home is protected. Nothing needs you right now." };
+}
+
+// Backend errors are written for developers. Turn the ones a household will
+// actually hit into something calm, keeping the detail available.
+export function friendlyError(message = "", context = "") {
+  const text = String(message);
+  if (/smtp|sender|recipient/i.test(text)) {
+    return "Weekly email is off. Add your mail server to turn it on.";
+  }
+  if (/urlopen|ssl|certificate|timed out|timeout|network is unreachable|name or service|temporary failure|connection/i.test(text) || context === "update") {
+    return "Couldn't update just now. Home Radar will retry automatically.";
+  }
+  return "Something went wrong. Try again in a moment.";
+}
+
 export function reportTips({ devices = [], alerts = [] } = {}) {
   const tips = [];
   const pending = devices.filter((device) => device.is_authorized === 0);

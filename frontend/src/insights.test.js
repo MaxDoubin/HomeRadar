@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceTypeLabel, explainAlert, gradeVerdict, letterGrade, reportTips } from "./insights";
+import { deviceTypeLabel, explainAlert, friendlyError, gradeVerdict, letterGrade, overviewHeadline, plural, reportTips, vendorHint } from "./insights";
 
 describe("deviceTypeLabel", () => {
   it("formats device types for people, keeping acronyms intact", () => {
@@ -83,5 +83,30 @@ describe("reportTips", () => {
     const tips = reportTips({ devices: [], alerts: [] });
     expect(tips).toHaveLength(3);
     expect(tips[0]).toMatch(/router's admin password/i);
+  });
+});
+
+describe("copy helpers", () => {
+  it("pluralizes counts", () => {
+    expect(plural(1, "open alert")).toBe("1\u00a0open alert");
+    expect(plural(2, "open alert")).toBe("2\u00a0open alerts");
+    expect(plural(2, "device needs", "devices need")).toBe("2\u00a0devices need");
+  });
+
+  it("leads the overview with what actually needs attention", () => {
+    expect(overviewHeadline({ alerts: [], devices: [] }).text).toMatch(/nothing needs you/i);
+    expect(overviewHeadline({ alerts: [], devices: [{ is_authorized: 0 }] }).text).toMatch(/^your home is protected\. 1\sdevice needs your review/i);
+    expect(overviewHeadline({ alerts: [], devices: [{ is_authorized: 0 }], score: 74 }).text).toMatch(/^home radar is protecting your home\. 1\sdevice needs/i);
+    expect(overviewHeadline({ alerts: [{ severity: "critical" }], devices: [] }).tone).toBe("danger");
+  });
+
+  it("only hints at what a vendor's chips usually power", () => {
+    expect(vendorHint("Espressif Inc.")).toMatch(/usually power smart plugs/i);
+    expect(vendorHint("Unknown Co")).toBe("");
+  });
+
+  it("turns developer errors into calm household language", () => {
+    expect(friendlyError("SMTP host, sender, and recipient must be configured")).toMatch(/weekly email is off/i);
+    expect(friendlyError("<urlopen error [SSL: CERTIFICATE_VERIFY_FAILED]>")).toMatch(/couldn't update just now/i);
   });
 });
