@@ -8,4 +8,4 @@ python-dotenv==1.2.2
 dnslib==0.9.26
 scikit-learn==1.7.1
 numpy==2.3.2
-certifi==2026.6.17
+certifi==2026.10.19

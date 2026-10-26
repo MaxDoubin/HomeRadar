@@ -156,6 +156,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The v3 default also installs the long-removed "tools" package, which
+          # current cmdline-tools no longer serve, failing the step.
+          packages: platform-tools
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4

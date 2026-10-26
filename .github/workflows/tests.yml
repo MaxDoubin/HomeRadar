@@ -95,6 +95,10 @@ jobs:
           distribution: temurin
           java-version: "21"
       - uses: android-actions/setup-android@v3
+        with:
+          # The v3 default also installs the long-removed "tools" package, which
+          # current cmdline-tools no longer serve, failing the step.
+          packages: platform-tools
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.13"
