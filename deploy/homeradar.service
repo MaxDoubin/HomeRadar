@@ -31,7 +31,7 @@ RestrictSUIDSGID=true
 LockPersonality=true
 RestrictRealtime=true
 RestrictNamespaces=true
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_PACKET AF_NETLINK
 SystemCallArchitectures=native
 ReadWritePaths=/var/lib/homeradar
 

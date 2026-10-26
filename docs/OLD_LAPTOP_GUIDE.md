@@ -15,12 +15,12 @@ Before you begin, gather the following:
 
 ---
 
-## Step 1: Download the Home Radar ISO
+## Step 1: Build the Home Radar ISO
 
 You'll need the Home Radar "ISO" file. An ISO is a disc image that contains the entire Home Radar operating system and software.
 
-*   *(Note: Since this is currently in development, if a pre-built ISO is not available in the Releases section, you will need to build the ISO yourself using the instructions in `docs/INSTALL.md` under "Live ISO".)*
-*   Once available, download the `homeradar-amd64.iso` file to your working computer.
+*   *(Note: a pre-built ISO isn't published yet; the Releases page has the desktop and phone apps, not a disk image. Build the ISO yourself on any Debian or Ubuntu computer by following "Live ISO" in `docs/INSTALL.md`. Physical boot testing across many old laptops is still in progress, so if your hardware gives you trouble, the Docker and native Debian installs in that guide are the reliable alternatives.)*
+*   The build produces `iso/live-image-amd64.hybrid.iso` (or `live-image-i386.hybrid.iso` for 32-bit machines). Copy that file to your working computer.
 
 ---
 
@@ -33,7 +33,7 @@ You need a special tool to write the ISO to the USB drive so that the old laptop
 1.  Download and install [balenaEtcher](https://etcher.balena.io/).
 2.  Plug your USB flash drive into your working computer.
 3.  Open balenaEtcher.
-4.  Click **Flash from file** and select the `homeradar-amd64.iso` file you downloaded.
+4.  Click **Flash from file** and select the `live-image-amd64.hybrid.iso` file you built.
 5.  Click **Select target** and choose your USB flash drive. **Double-check you selected the correct drive!**
 6.  Click **Flash!**. The process will take a few minutes. Once finished, safely eject the USB drive.
 
@@ -79,7 +79,11 @@ Once the laptop reboots, it is now your Home Radar appliance! The screen will li
     - The easiest way is to check your router's "Connected Devices" or "DHCP Client List" page. Look for a newly connected wired device.
     - Let's say the IP address is `192.168.1.50`.
 4.  In your web browser, go to: `http://<YOUR_APPLIANCE_IP>:8000` (e.g., `http://192.168.1.50:8000`).
-5.  You should now see the **Home Radar Dashboard**!
+5.  You should now see the **Home Radar Dashboard**, asking for a **pairing code**. This keeps strangers on your Wi-Fi from taking control of your appliance. The appliance prints a one-time code when it starts. On the appliance itself, open a terminal and run:
+    ```bash
+    sudo journalctl -u homeradar --no-pager | grep "PAIRING CODE"
+    ```
+    Type the 6-digit code into the dashboard. (Opening `http://127.0.0.1:8000` in a browser on the appliance itself skips this step.)
 6.  Follow the **First-Run Wizard** on the screen. It will guide you through:
     *   Setting a household name.
     *   Entering an email address for your weekly security digest (optional).

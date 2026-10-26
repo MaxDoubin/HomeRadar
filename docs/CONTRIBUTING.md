@@ -48,6 +48,7 @@ the backend serve the built dashboard from the same origin (its default behavior
 
 ## Reporting issues
 
-Open a GitHub issue with steps to reproduce, your OS/hardware, and relevant logs. For
-security-relevant findings (e.g. a way to bypass the DNS proxy or spoof a trusted
-device), please open an issue and flag it clearly as security-related.
+Open a GitHub issue with steps to reproduce, your OS/hardware, and relevant logs. Do
+**not** open a public issue for security vulnerabilities (e.g. a way to bypass the DNS
+proxy or spoof a trusted device); report them privately as described in
+[SECURITY.md](../SECURITY.md).

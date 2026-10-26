@@ -7,8 +7,19 @@ python3 -m venv .venv
 npm --prefix frontend install
 npm --prefix frontend run build
 
-mkdir -p /etc/homeradar /var/lib/homeradar
+# deploy/homeradar.service runs as this user; mirror scripts/setup.sh.
+if ! getent group homeradar >/dev/null; then
+  groupadd --system homeradar
+fi
+if ! id -u homeradar >/dev/null 2>&1; then
+  useradd --system --gid homeradar --home-dir /var/lib/homeradar --shell /usr/sbin/nologin homeradar
+fi
+
+install -d -m 0755 -o root -g root /etc/homeradar
+install -d -m 0750 -o homeradar -g homeradar /var/lib/homeradar
 cp deploy/homeradar.env.example /etc/homeradar/homeradar.env
+chown root:homeradar /etc/homeradar/homeradar.env
+chmod 0640 /etc/homeradar/homeradar.env
 cp deploy/homeradar.service /etc/systemd/system/
 cp deploy/homeradar-blocklists.service /etc/systemd/system/
 cp deploy/homeradar-blocklists.timer /etc/systemd/system/
