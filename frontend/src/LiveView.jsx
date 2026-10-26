@@ -69,7 +69,7 @@ function layoutDevices(devices) {
 }
 
 // Real words that are spelled with a hyphen; never split these.
-const HYPHENATED_WORDS = /\b(?:wi-fi|e-reader|e-ink|t-mobile|x-box|hi-fi)\b/gi;
+const HYPHENATED_WORDS = /\b(?:wi-fi|e-reader|e-ink|t-mobile|x-box|hi-fi|pi-hole)\b/gi;
 const HOSTNAME_STYLE = /^[A-Za-z0-9]+(?:[-_][A-Za-z0-9]+)+$/;
 
 // Only a raw hostname like "Moms-MacBook-Air" gets its dashes turned into

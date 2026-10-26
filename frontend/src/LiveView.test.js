@@ -10,6 +10,7 @@ describe("mapLabel", () => {
   it("keeps real hyphenated words intact", () => {
     expect(mapLabel({ hostname: "Kitchen-Wi-Fi-Extender" })).toBe("Kitchen Wi-Fi Extender");
     expect(mapLabel({ hostname: "Kids-E-Reader" })).toBe("Kids E-Reader");
+    expect(mapLabel({ hostname: "pi-hole-old" })).toBe("pi-hole old");
   });
 
   it("never rewrites friendly names, vendors, or non-hostname strings", () => {
