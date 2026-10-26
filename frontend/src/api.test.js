@@ -117,7 +117,7 @@ describe("api", () => {
       return { ok: false, status: 401, json: async () => ({ detail: "Unauthorized" }) };
     });
 
-    fetch.mockImplementationOnce(async (url, options = {}) => {
+    fetch.mockImplementationOnce(async (url) => {
       if (String(url).includes("/pair/claim")) {
         return { ok: true, status: 200, json: async () => ({ token: "new-paired-token" }) };
       }
