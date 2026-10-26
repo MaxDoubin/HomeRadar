@@ -50,3 +50,19 @@ def test_blocked_threat_activity_lowers_device_and_household_score():
             household = household_score(conn)
         assert device["trust_score"] < 50
         assert household["score"] <= device["trust_score"]
+
+
+def test_blocked_tracker_lookups_do_not_lower_security_trust():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = str(Path(tmp) / "trust.db")
+        models.init_db(db_path)
+        with models.get_conn(db_path) as conn:
+            tv = models.upsert_device(conn, mac="AA:BB:CC:00:00:03", ip="192.168.1.12", hostname=None, vendor=None)
+            other = models.upsert_device(conn, mac="AA:BB:CC:00:00:04", ip="192.168.1.13", hostname=None, vendor=None)
+            for _ in range(10):
+                models.log_traffic(conn, device_id=tv, domain="ads.doubleclick.net", was_blocked=True)
+                models.log_traffic(conn, device_id=other, domain="phish.example", was_blocked=True)
+            tv_result = score_device(conn, models.get_device(conn, tv))
+            other_result = score_device(conn, models.get_device(conn, other))
+        assert "blocked requests" not in tv_result.factors
+        assert other_result.factors["blocked requests"] == -25

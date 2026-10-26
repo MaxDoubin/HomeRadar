@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from backend.db import models
+from backend.insights.trackers import match_tracker
 from backend.monitor import habits
 from backend.monitor.anomaly_detection import analyze_device
 
@@ -42,9 +43,19 @@ def score_device(conn, device: dict) -> TrustResult:
            WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
         (device["id"],),
     ).fetchone()
-    blocked = int(traffic["blocked"])
     threats = int(traffic["threats"])
     variance = int(traffic["domain_variance"])
+    # Blocked ad/analytics lookups are a privacy matter (see the privacy report),
+    # not evidence of compromise; nearly every phone and TV makes them, so they
+    # must not drag a device's security trust down.
+    blocked_rows = conn.execute(
+        """SELECT domain, COUNT(*) AS hits FROM traffic_logs
+           WHERE device_id = ? AND was_blocked = 1
+             AND julianday(created_at) >= julianday('now', '-24 hours')
+           GROUP BY domain""",
+        (device["id"],),
+    ).fetchall()
+    blocked = sum(int(row["hits"]) for row in blocked_rows if match_tracker(row["domain"]) is None)
     if blocked:
         factors["blocked requests"] = -min(25, blocked * 3)
     if threats:
