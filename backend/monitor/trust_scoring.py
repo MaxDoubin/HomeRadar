@@ -33,10 +33,10 @@ def score_device(conn, device: dict) -> TrustResult:
     elif authorization == 2:
         factors["household blocked"] = -50
 
-    window = "julianday(created_at) >= julianday('now', '-24 hours')"
     variance = int(
         conn.execute(
-            f"SELECT COUNT(DISTINCT domain) FROM traffic_logs WHERE device_id = ? AND {window}",
+            """SELECT COUNT(DISTINCT domain) FROM traffic_logs
+               WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')""",
             (device["id"],),
         ).fetchone()[0]
     )
@@ -45,12 +45,13 @@ def score_device(conn, device: dict) -> TrustResult:
     # must not count as blocked requests or as threat-intel matches here.
     blocked = threats = 0
     for row in conn.execute(
-        f"""SELECT domain,
-                   COALESCE(SUM(was_blocked), 0) AS blocked,
-                   COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
-                       AS threats
-            FROM traffic_logs WHERE device_id = ? AND {window}
-            GROUP BY domain""",
+        """SELECT domain,
+                  COALESCE(SUM(was_blocked), 0) AS blocked,
+                  COALESCE(SUM(CASE WHEN threat_level IN ('warning', 'critical') THEN 1 ELSE 0 END), 0)
+                      AS threats
+           FROM traffic_logs
+           WHERE device_id = ? AND julianday(created_at) >= julianday('now', '-24 hours')
+           GROUP BY domain""",
         (device["id"],),
     ).fetchall():
         if match_tracker(row["domain"]) is None:
