@@ -68,8 +68,7 @@
       ],
       "category": "Utility",
       "synopsis": "Local home network security dashboard",
-      "maintainer": "Max Doubin <95324785+MaxDoubin@users.noreply.github.com>",
-      "syncDesktopName": true
+      "maintainer": "Max Doubin <95324785+MaxDoubin@users.noreply.github.com>"
     },
     "extraResources": [
       {
@@ -90,6 +89,6 @@
     ]
   },
   "overrides": {
-    "brace-expansion": "5.0.8"
+    "brace-expansion": "^5.0.12"
   }
 }

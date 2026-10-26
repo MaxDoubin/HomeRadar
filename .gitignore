@@ -41,3 +41,4 @@ mobile/ios/DerivedData/
 /build/
 desktop/resources/
 *.spec
+desktop/dist/
