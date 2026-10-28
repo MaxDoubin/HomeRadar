@@ -2,9 +2,24 @@ import Combine
 import Foundation
 import SwiftUI
 
+class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        application.registerForRemoteNotifications()
+        return true
+    }
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenString = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
+        Task {
+            await AppSession.shared.registerAPNSToken(token: tokenString)
+        }
+    }
+}
+
 @main
 struct HomeRadarApp: App {
-    @StateObject private var session = AppSession()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @ObservedObject private var session = AppSession.shared
 
     var body: some Scene {
         WindowGroup {
@@ -43,6 +58,8 @@ struct DashboardState: Equatable {
 /// instance rather than opening its own connection.
 @MainActor
 final class AppSession: ObservableObject {
+    static let shared = AppSession()
+
     @Published private(set) var isConnected: Bool
     @Published private(set) var dashboardState: DashboardState = .empty
     @Published private(set) var socketState: DashboardSocketState = .disconnected
@@ -144,5 +161,11 @@ final class AppSession: ObservableObject {
     /// backgrounds.
     func stopLiveUpdates() {
         socket.stop()
+    }
+
+    /// Registers an APNs device token with the appliance.
+    func registerAPNSToken(token: String) async {
+        guard connectionStore.hasCredentials else { return }
+        try? await client.registerAPNSToken(token: token)
     }
 }

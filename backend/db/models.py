@@ -407,6 +407,18 @@ def get_settings(conn) -> dict[str, str]:
     }
 
 
+def register_apns_token(conn, token: str) -> None:
+    raw_tokens = get_setting(conn, "apns_device_tokens", "[]") or "[]"
+    try:
+        tokens = json.loads(raw_tokens)
+    except json.JSONDecodeError:
+        tokens = []
+
+    if token not in tokens:
+        tokens.append(token)
+        set_settings(conn, {"apns_device_tokens": json.dumps(tokens)})
+
+
 def get_device_policy(conn, device_id: int) -> dict:
     row = conn.execute(
         "SELECT * FROM device_policies WHERE device_id = ?", (device_id,)

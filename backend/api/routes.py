@@ -69,6 +69,10 @@ class AlertUpdate(BaseModel):
     resolved: bool = True
 
 
+class APNSTokenRequest(BaseModel):
+    token: str
+
+
 class SettingsUpdate(BaseModel):
     household_name: str | None = Field(default=None, max_length=120)
     digest_email: str | None = Field(default=None, max_length=320)
@@ -471,6 +475,13 @@ def get_settings():
         "setup_complete": saved.get("setup_complete", "false") == "true",
         "custom_dns_records": saved.get("custom_dns_records", "{}"),
     }
+
+
+@router.post("/notifications/apns-token", dependencies=[Depends(require_token)])
+def register_apns_token(request: APNSTokenRequest):
+    with get_conn() as conn:
+        models.register_apns_token(conn, request.token)
+    return {"registered": True}
 
 
 @router.patch("/settings", dependencies=[Depends(require_token)])
